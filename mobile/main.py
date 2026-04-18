@@ -1,10 +1,13 @@
 """
-德语学习助手 - 安卓版 v0.3
+德语学习助手 - 安卓版 v0.4
 音频/视频播放 + 句子同步高亮 + 转写 + 翻译 + 点词查义 + 收藏 + Anki导出
+音频后端：ffpyplayer（支持 mp3/m4a/wav/ogg/flac/mp4 等所有格式）
 """
 
 import os
 os.environ['KIVY_LOG_MODE'] = 'MIXED'
+os.environ['KIVY_VIDEO'] = 'ffpyplayer'       # 强制用 ffpyplayer 播放视频
+os.environ['KIVY_AUDIO'] = 'ffpyplayer'       # 强制用 ffpyplayer 播放音频
 
 from kivy.app import App
 from kivy.lang import Builder
@@ -393,26 +396,76 @@ class MainScreen(Screen):
             self._load_audio_player()
 
     def _load_audio_player(self):
-        """加载音频到播放器"""
+        """加载音频到播放器（使用 ffpyplayer 后端）"""
         try:
             if self.sound:
-                self.sound.stop()
-                self.sound.unload()
+                try:
+                    self.sound.stop()
+                    self.sound.unload()
+                except Exception:
+                    pass
                 self.sound = None
 
-            self.sound = SoundLoader.load(self.current_audio_path)
+            path = self.current_audio_path
+            self.ids.status_label.text = '正在加载音频...'
+
+            # 方式1: Kivy SoundLoader（环境变量已设为 ffpyplayer）
+            try:
+                self.sound = SoundLoader.load(path)
+            except Exception as e:
+                print(f"SoundLoader异常: {e}")
+                self.sound = None
+
+            # 方式2: 如果 SoundLoader 失败，直接用 ffpyplayer
+            if not self.sound:
+                try:
+                    from ffpyplayer.player import MediaPlayer
+                    self.sound = _FFPyPlayerWrapper(path)
+                    print(f"使用ffpyplayer直接加载: {path}")
+                except Exception as e:
+                    print(f"ffpyplayer加载失败: {e}")
+                    self.sound = None
+
             if self.sound:
-                # 显示播放器区域
-                self.ids.player_area.height = dp(50)
-                self.ids.player_area.opacity = 1
-                duration = self.sound.length
-                self.ids.seek_slider.max = max(duration, 1)
-                self.ids.time_label.text = f'0:00/{self._fmt_time(duration)}'
-                self.ids.status_label.text = '音频已加载，可以开始转写或直接播放'
+                # 获取时长
+                duration = self._get_sound_duration()
+                if duration and duration > 0:
+                    # 显示播放器区域
+                    self.ids.player_area.height = dp(50)
+                    self.ids.player_area.opacity = 1
+                    self.ids.seek_slider.max = duration
+                    self.ids.time_label.text = f'0:00/{self._fmt_time(duration)}'
+                    self.ids.status_label.text = f'音频已加载 ({self._fmt_time(duration)})，可以播放或转写'
+                else:
+                    self.ids.player_area.height = dp(50)
+                    self.ids.player_area.opacity = 1
+                    self.ids.status_label.text = '音频已加载（未知时长），可以播放'
             else:
-                self.ids.status_label.text = '无法加载音频文件'
+                self.ids.status_label.text = '无法加载音频，请检查文件格式（支持mp3/wav/m4a/ogg）'
+
         except Exception as e:
             self.ids.status_label.text = f'加载音频失败: {e}'
+            import traceback
+            traceback.print_exc()
+
+    def _get_sound_duration(self):
+        """安全获取音频时长"""
+        try:
+            if isinstance(self.sound, _FFPyPlayerWrapper):
+                return self.sound.length
+            d = getattr(self.sound, 'length', 0)
+            return d if d and d > 0 else 0
+        except Exception:
+            return 0
+
+    def _get_sound_pos(self):
+        """安全获取当前播放位置"""
+        try:
+            if isinstance(self.sound, _FFPyPlayerWrapper):
+                return self.sound.get_pos()
+            return self.sound.get_pos()
+        except Exception:
+            return 0
 
     # ─── 播放控制 ───
     def toggle_play(self):
@@ -421,39 +474,59 @@ class MainScreen(Screen):
             return
 
         if self.is_playing:
-            self.sound.stop()
+            # 暂停
+            try:
+                self.sound.stop()
+            except Exception:
+                pass
             self.is_playing = False
             self.ids.play_btn.text = '播放'
             if self.update_event:
                 self.update_event.cancel()
+                self.update_event = None
             self._clear_highlights()
         else:
-            self.sound.play()
-            self.is_playing = True
-            self.ids.play_btn.text = '暂停'
-            self.update_event = Clock.schedule_interval(self._update_playback, 0.1)
+            # 播放
+            try:
+                self.sound.play()
+                self.is_playing = True
+                self.ids.play_btn.text = '暂停'
+                self.update_event = Clock.schedule_interval(self._update_playback, 0.15)
+                self.ids.status_label.text = '播放中...'
+            except Exception as e:
+                self.ids.status_label.text = f'播放失败: {e}'
 
     def stop_audio(self):
         if self.sound:
-            self.sound.stop()
+            try:
+                self.sound.stop()
+            except Exception:
+                pass
         self.is_playing = False
         self.ids.play_btn.text = '播放'
         self.ids.seek_slider.value = 0
         if self.update_event:
             self.update_event.cancel()
+            self.update_event = None
         self._clear_highlights()
-        if self.sound:
-            self.ids.time_label.text = f'0:00/{self._fmt_time(self.sound.length)}'
+        dur = self._get_sound_duration()
+        self.ids.time_label.text = f'0:00/{self._fmt_time(dur)}'
 
     def _update_playback(self, dt):
         """定时更新播放进度和句子高亮"""
         if not self.sound or not self.is_playing:
             return
 
-        pos = self.sound.get_pos()
-        duration = self.sound.length
+        try:
+            pos = self._get_sound_pos()
+            duration = self._get_sound_duration()
+        except Exception:
+            return
 
-        # 更新进度条（不拖拽时）
+        if duration <= 0:
+            return
+
+        # 更新进度条
         if not self._slider_dragging:
             self.ids.seek_slider.value = pos
 
@@ -464,18 +537,23 @@ class MainScreen(Screen):
         self._highlight_at_time(pos)
 
         # 播放结束
-        if pos >= duration and duration > 0:
+        if pos >= duration - 0.2:
             self.is_playing = False
             self.ids.play_btn.text = '播放'
             if self.update_event:
                 self.update_event.cancel()
+                self.update_event = None
             self._clear_highlights()
+            self.ids.status_label.text = '播放完成'
 
     def on_slider_seek(self, slider, touch):
         """拖拽进度条跳转"""
         if slider.collide_point(*touch.pos) and self.sound:
-            self.sound.seek(slider.value)
-            self._highlight_at_time(slider.value)
+            try:
+                self.sound.seek(slider.value)
+                self._highlight_at_time(slider.value)
+            except Exception:
+                pass
 
     def _highlight_at_time(self, pos):
         """根据播放位置高亮对应句子"""
@@ -846,6 +924,59 @@ class CollectionScreen(Screen):
 
 
 # ── 应用 ──
+# ── ffpyplayer 包装器（兼容 Kivy SoundLoader 接口）──
+class _FFPyPlayerWrapper:
+    """将 ffpyplayer.MediaPlayer 包装成 Kivy SoundLoader 兼容接口"""
+
+    def __init__(self, filepath):
+        from ffpyplayer.player import MediaPlayer
+        self._player = MediaPlayer(filepath)
+        self._filepath = filepath
+        self._paused = True
+        self._duration = 0.0
+        # 等待获取时长
+        import time as _time
+        for _ in range(30):  # 最多等3秒
+            _time.sleep(0.1)
+            try:
+                dur = self._player.get_metadata().get('duration', 0)
+                if dur and dur > 0:
+                    self._duration = float(dur)
+                    break
+            except Exception:
+                pass
+
+    @property
+    def length(self):
+        return self._duration
+
+    def play(self):
+        self._player.set_pause(False)
+        self._paused = False
+
+    def stop(self):
+        self._player.set_pause(True)
+        self._paused = True
+
+    def unload(self):
+        try:
+            self._player.close_player()
+        except Exception:
+            pass
+
+    def get_pos(self):
+        try:
+            return self._player.get_pts()
+        except Exception:
+            return 0.0
+
+    def seek(self, position):
+        try:
+            self._player.seek(position, relative=False, accurate=True)
+        except Exception:
+            pass
+
+
 class DeutschLernenApp(App):
 
     def build(self):
