@@ -1,0 +1,278 @@
+{
+  "Hallo": {
+    "word": "Hallo",
+    "normalized_word": "hallo",
+    "part_of_speech": "interj",
+    "german_definition": "Begrüßungswort",
+    "chinese_definition": "你好",
+    "english_definition": "hello",
+    "examples": [
+      {
+        "german": "Hallo, wie geht es dir?",
+        "chinese": "你好，你好吗？"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 100,
+    "synonyms": [
+      "Guten Tag",
+      "Hi"
+    ],
+    "antonyms": [
+      "Tschüss"
+    ],
+    "related_words": [
+      "Guten Morgen",
+      "Guten Abend"
+    ]
+  },
+  "danke": {
+    "word": "danke",
+    "normalized_word": "danke",
+    "part_of_speech": "interj",
+    "german_definition": "Dank ausdrücken",
+    "chinese_definition": "谢谢",
+    "english_definition": "thank you",
+    "examples": [
+      {
+        "german": "Danke für deine Hilfe.",
+        "chinese": "谢谢你的帮助。"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 50,
+    "synonyms": [
+      "vielen Dank",
+      "Dankeschön"
+    ],
+    "antonyms": [],
+    "related_words": [
+      "bitte",
+      "Bitte"
+    ]
+  },
+  "bitte": {
+    "word": "bitte",
+    "normalized_word": "bitte",
+    "part_of_speech": "adv",
+    "german_definition": "Höflichkeitsformel",
+    "chinese_definition": "请；不客气",
+    "english_definition": "please; you're welcome",
+    "examples": [
+      {
+        "german": "Könnten Sie mir bitte helfen?",
+        "chinese": "请您帮帮我好吗？"
+      },
+      {
+        "german": "Danke! - Bitte!",
+        "chinese": "谢谢！- 不客气！"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 30,
+    "synonyms": [
+      "gefälligst"
+    ],
+    "antonyms": [],
+    "related_words": [
+      "danke",
+      "Bitte"
+    ]
+  },
+  "ich": {
+    "word": "ich",
+    "normalized_word": "ich",
+    "part_of_speech": "pron",
+    "german_definition": "1. Person Singular",
+    "chinese_definition": "我",
+    "english_definition": "I",
+    "examples": [
+      {
+        "german": "Ich bin Student.",
+        "chinese": "我是学生。"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 5,
+    "synonyms": [],
+    "antonyms": [
+      "du",
+      "er",
+      "sie",
+      "es"
+    ],
+    "related_words": [
+      "mein",
+      "meine",
+      "mich",
+      "mir"
+    ]
+  },
+  "du": {
+    "word": "du",
+    "normalized_word": "du",
+    "part_of_speech": "pron",
+    "german_definition": "2. Person Singular (informell)",
+    "chinese_definition": "你",
+    "english_definition": "you (informal)",
+    "examples": [
+      {
+        "german": "Wie heißt du?",
+        "chinese": "你叫什么名字？"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 10,
+    "synonyms": [],
+    "antonyms": [
+      "ich",
+      "er",
+      "sie",
+      "es"
+    ],
+    "related_words": [
+      "dein",
+      "deine",
+      "dich",
+      "dir"
+    ]
+  },
+  "ist": {
+    "word": "ist",
+    "normalized_word": "ist",
+    "part_of_speech": "verb",
+    "german_definition": "3. Person Singular von 'sein'",
+    "chinese_definition": "是（第三人称单数）",
+    "english_definition": "is (third person singular of 'to be')",
+    "examples": [
+      {
+        "german": "Das ist gut.",
+        "chinese": "这很好。"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 2,
+    "synonyms": [
+      "befindet sich"
+    ],
+    "antonyms": [
+      "ist nicht"
+    ],
+    "related_words": [
+      "bin",
+      "bist",
+      "sind",
+      "seid"
+    ]
+  },
+  "gut": {
+    "word": "gut",
+    "normalized_word": "gut",
+    "part_of_speech": "adj",
+    "german_definition": "positiv, von hoher Qualität",
+    "chinese_definition": "好的",
+    "english_definition": "good",
+    "examples": [
+      {
+        "german": "Das ist ein gutes Buch.",
+        "chinese": "这是一本好书。"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 15,
+    "synonyms": [
+      "prima",
+      "ausgezeichnet",
+      "hervorragend"
+    ],
+    "antonyms": [
+      "schlecht"
+    ],
+    "related_words": [
+      "besser",
+      "am besten",
+      "Güte"
+    ]
+  },
+  "schlecht": {
+    "word": "schlecht",
+    "normalized_word": "schlecht",
+    "part_of_speech": "adj",
+    "german_definition": "negativ, von niedriger Qualität",
+    "chinese_definition": "坏的",
+    "english_definition": "bad",
+    "examples": [
+      {
+        "german": "Das Wetter ist schlecht.",
+        "chinese": "天气不好。"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 20,
+    "synonyms": [
+      "schlimm",
+      "übel"
+    ],
+    "antonyms": [
+      "gut"
+    ],
+    "related_words": [
+      "schlechter",
+      "am schlechtesten",
+      "Schlechtigkeit"
+    ]
+  },
+  "Wasser": {
+    "word": "Wasser",
+    "normalized_word": "wasser",
+    "part_of_speech": "noun",
+    "german_definition": "H₂O, transparente Flüssigkeit",
+    "chinese_definition": "水",
+    "english_definition": "water",
+    "examples": [
+      {
+        "german": "Ich möchte ein Glas Wasser.",
+        "chinese": "我想要一杯水。"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 25,
+    "synonyms": [
+      "H₂O"
+    ],
+    "antonyms": [],
+    "related_words": [
+      "wasserreich",
+      "Wasserfall",
+      "Wasserglas"
+    ]
+  },
+  "essen": {
+    "word": "essen",
+    "normalized_word": "essen",
+    "part_of_speech": "verb",
+    "german_definition": "Nahrung zu sich nehmen",
+    "chinese_definition": "吃",
+    "english_definition": "to eat",
+    "examples": [
+      {
+        "german": "Ich esse gern Pizza.",
+        "chinese": "我喜欢吃披萨。"
+      }
+    ],
+    "difficulty_level": 1,
+    "frequency_rank": 35,
+    "synonyms": [
+      "speisen",
+      "verzehren"
+    ],
+    "antonyms": [
+      "fasten"
+    ],
+    "related_words": [
+      "Essen",
+      "Essenszeit",
+      "餐厅"
+    ]
+  }
+}

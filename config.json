@@ -1,0 +1,55 @@
+{
+  "app": {
+    "name": "Deutsch Lernen App",
+    "version": "0.1.0",
+    "language": "zh-CN",
+    "theme": "light",
+    "auto_save": true,
+    "recent_files": []
+  },
+  "audio": {
+    "default_sample_rate": 16000,
+    "default_format": "wav",
+    "silence_threshold": -40,
+    "min_silence_len": 500,
+    "segment_duration": 10.0
+  },
+  "transcription": {
+    "use_api": true,
+    "api_key": "fk201403-hCEJwCHpGTrUkdzzkvBW93gvrWCM9vDm",
+    "api_base": "https://openai.api2d.net/v1",
+    "language": "de",
+    "task": "transcribe"
+  },
+  "translation": {
+    "use_api": true,
+    "api_key": "fk201403-hCEJwCHpGTrUkdzzkvBW93gvrWCM9vDm",
+    "api_base": "https://openai.api2d.net/v1",
+    "source_lang": "de",
+    "target_lang": "zh",
+    "model": "gpt-3.5-turbo"
+  },
+  "database": {
+    "path": "data/deutsch_lernen.db",
+    "echo": false
+  },
+  "export": {
+    "anki_deck_name": "Deutsch Lernen",
+    "anki_deck_description": "德语学习牌组",
+    "anki_model_id": 1607392319,
+    "anki_deck_id": 2059400110,
+    "include_audio": true,
+    "output_dir": "exports"
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "logs/app.log",
+    "max_size": 10485760
+  },
+  "paths": {
+    "data_dir": "data",
+    "audio_dir": "data/audio",
+    "exports_dir": "exports",
+    "logs_dir": "logs"
+  }
+}
