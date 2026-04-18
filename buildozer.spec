@@ -13,13 +13,13 @@ package.domain = org.deutschlernen
 source.dir = mobile
 
 # (list) Source files to include (let empty to include all the files)
-source.include_exts = py,png,jpg,kv,atlas,json,md,txt
+source.include_exts = py,png,jpg,kv,atlas,json,md,txt,ttf,otf
 
 # (list) List of inclusions using pattern matching
-source.include_patterns = resources/*,src/*,config.json
+source.include_patterns = resources/*,src/*,config.json,fonts/*
 
 # (str) Application versioning (method 1)
-version = 0.1.0
+version = 0.2.0
 
 # (list) Application requirements
 # 这里列出应用需要的Python包
