@@ -393,22 +393,46 @@ class MainScreen(Screen):
 
         raw_path = selection[0]
 
-        if platform == 'android':
-            # Android文件选择器返回content:// URI，需复制到本地
-            local_path = self._copy_content_uri_to_local(raw_path)
-            if local_path:
-                self.current_audio_path = local_path
-                filename = os.path.basename(local_path)
-                self.ids.status_label.text = f'已加载: {filename}'
-            else:
-                self.ids.status_label.text = '文件复制失败，请重试'
-                return
-        else:
-            self.current_audio_path = raw_path
-            filename = os.path.basename(raw_path)
-            self.ids.status_label.text = f'已选择: {filename}'
+        # 显示进度条
+        self.ids.progress.opacity = 1
+        self.ids.progress.value = 10
+        self.ids.status_label.text = '正在读取文件...'
 
-        self._load_audio_player()
+        # 后台线程处理，避免阻塞UI
+        thread = threading.Thread(target=self._import_thread, args=(raw_path,))
+        thread.daemon = True
+        thread.start()
+
+    def _import_thread(self, raw_path):
+        """后台导入线程"""
+        try:
+            if platform == 'android':
+                Clock.schedule_once(lambda dt: self._set_progress(20, '正在复制文件到本地...'), 0)
+                local_path = self._copy_content_uri_to_local(raw_path)
+                if local_path:
+                    Clock.schedule_once(lambda dt: self._set_progress(60, f'复制完成: {os.path.basename(local_path)}'), 0)
+                    self.current_audio_path = local_path
+                else:
+                    Clock.schedule_once(lambda dt: self._set_progress(0, '文件复制失败，请重试'), 0)
+                    Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'opacity', 0), 2)
+                    return
+            else:
+                self.current_audio_path = raw_path
+                Clock.schedule_once(lambda dt: self._set_progress(40, f'已选择: {os.path.basename(raw_path)}'), 0)
+
+            # 加载音频到播放器
+            Clock.schedule_once(lambda dt: self._set_progress(70, '正在初始化播放器...'), 0)
+            Clock.schedule_once(lambda dt: self._load_audio_player(), 0)
+
+        except Exception as e:
+            Clock.schedule_once(lambda dt: self._set_progress(0, f'导入失败: {e}'), 0)
+            Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'opacity', 0), 2)
+
+    def _set_progress(self, value, status_text):
+        """更新进度条和状态文本"""
+        if value > 0:
+            self.ids.progress.value = value
+        self.ids.status_label.text = status_text
 
     def _copy_content_uri_to_local(self, uri):
         """将Android content:// URI复制到应用本地存储"""
@@ -440,16 +464,36 @@ class MainScreen(Screen):
                 uri_obj = Uri.parse(uri)
                 input_stream = ContentResolver.openInputStream(uri_obj)
 
-                # 读取并写入本地文件
+                # 获取文件大小（用于进度显示）
+                total_size = 0
+                try:
+                    total_size = ContentResolver.openFileDescriptor(uri_obj, "r").getStatSize()
+                except Exception:
+                    pass
+
+                # 读取并写入本地文件（带进度）
+                copied = 0
+                buf_size = 8192
                 with open(local_path, 'wb') as out_f:
-                    buffer = jarray('b')(4096)
+                    buffer = jarray('b')(buf_size)
                     while True:
                         count = input_stream.read(buffer)
                         if count <= 0:
                             break
                         out_f.write(bytes(buffer[:count]))
+                        copied += count
+
+                        # 更新复制进度（20%~55%区间）
+                        if total_size > 0:
+                            pct = 20 + int(35 * copied / total_size)
+                            Clock.schedule_once(
+                                lambda dt, p=pct, c=copied, t=total_size:
+                                    self._set_progress(p, f'已复制 {c//1024}KB / {t//1024}KB'),
+                                0
+                            )
+
                 input_stream.close()
-                print(f"文件复制成功: {local_path}")
+                print(f"文件复制成功: {local_path} ({copied} bytes)")
                 return local_path
 
             except Exception as e1:
@@ -508,15 +552,23 @@ class MainScreen(Screen):
                 if duration and duration > 0:
                     self.ids.seek_slider.max = duration
                     self.ids.time_label.text = f'0:00/{self._fmt_time(duration)}'
-                    self.ids.status_label.text = f'音频已加载 ({self._fmt_time(duration)})，点击播放'
+                    file_size = os.path.getsize(path) // 1024
+                    self.ids.progress.value = 100
+                    self.ids.status_label.text = f'已加载 ({self._fmt_time(duration)}, {file_size}KB)，点击播放'
                 else:
                     self.ids.seek_slider.max = 9999
                     self.ids.time_label.text = '0:00/?:??'
+                    self.ids.progress.value = 100
                     self.ids.status_label.text = '音频已加载，点击播放'
+
+                # 2秒后隐藏进度条
+                Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'opacity', 0), 2)
             else:
+                self.ids.progress.opacity = 0
                 self.ids.status_label.text = '无法加载音频，格式可能不支持（支持mp3/ogg/wav）'
 
         except Exception as e:
+            self.ids.progress.opacity = 0
             self.ids.status_label.text = f'加载异常: {e}'
             import traceback
             traceback.print_exc()

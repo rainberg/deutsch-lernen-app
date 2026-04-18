@@ -19,7 +19,7 @@ source.include_exts = py,png,jpg,kv,atlas,json,md,txt,ttf,otf
 source.include_patterns = resources/*,src/*,config.json,fonts/*
 
 # (str) Application versioning (method 1)
-version = 0.5.0
+version = 0.5.1
 
 # (list) Application requirements
 # 这里列出应用需要的Python包
