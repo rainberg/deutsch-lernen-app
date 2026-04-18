@@ -1,13 +1,11 @@
 """
-德语学习助手 - 安卓版 v0.4
-音频/视频播放 + 句子同步高亮 + 转写 + 翻译 + 点词查义 + 收藏 + Anki导出
-音频后端：ffpyplayer（支持 mp3/m4a/wav/ogg/flac/mp4 等所有格式）
+德语学习助手 - 安卓版 v0.5
+音频播放 + 句子同步 + 转写 + 翻译 + 收藏 + Anki导出
+修复：Android content:// URI 处理 + 音频播放稳定性
 """
 
 import os
 os.environ['KIVY_LOG_MODE'] = 'MIXED'
-os.environ['KIVY_VIDEO'] = 'ffpyplayer'       # 强制用 ffpyplayer 播放视频
-os.environ['KIVY_AUDIO'] = 'ffpyplayer'       # 强制用 ffpyplayer 播放音频
 
 from kivy.app import App
 from kivy.lang import Builder
@@ -389,14 +387,91 @@ class MainScreen(Screen):
             self.ids.status_label.text = '请在安卓设备上使用文件选择器'
 
     def on_audio_selected(self, selection):
-        if selection:
-            self.current_audio_path = selection[0]
-            filename = os.path.basename(self.current_audio_path)
+        """处理选择的文件（Android返回content:// URI需要复制到本地）"""
+        if not selection:
+            return
+
+        raw_path = selection[0]
+
+        if platform == 'android':
+            # Android文件选择器返回content:// URI，需复制到本地
+            local_path = self._copy_content_uri_to_local(raw_path)
+            if local_path:
+                self.current_audio_path = local_path
+                filename = os.path.basename(local_path)
+                self.ids.status_label.text = f'已加载: {filename}'
+            else:
+                self.ids.status_label.text = '文件复制失败，请重试'
+                return
+        else:
+            self.current_audio_path = raw_path
+            filename = os.path.basename(raw_path)
             self.ids.status_label.text = f'已选择: {filename}'
-            self._load_audio_player()
+
+        self._load_audio_player()
+
+    def _copy_content_uri_to_local(self, uri):
+        """将Android content:// URI复制到应用本地存储"""
+        try:
+            import shutil
+
+            # 获取应用私有目录
+            from android.storage import app_storage_path
+            local_dir = app_storage_path()
+
+            # 从URI提取文件名
+            filename = 'audio_import'
+            if '/' in uri:
+                parts = uri.split('/')
+                for part in reversed(parts):
+                    if '.' in part and len(part) > 3:
+                        filename = part
+                        break
+
+            local_path = os.path.join(local_dir, filename)
+
+            # 方法1: 用Android ContentResolver复制
+            try:
+                from jnius import autoclass, cast
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                context = PythonActivity.mActivity
+                ContentResolver = context.getContentResolver()
+                Uri = autoclass('android.net.Uri')
+                uri_obj = Uri.parse(uri)
+                input_stream = ContentResolver.openInputStream(uri_obj)
+
+                # 读取并写入本地文件
+                with open(local_path, 'wb') as out_f:
+                    buffer = jarray('b')(4096)
+                    while True:
+                        count = input_stream.read(buffer)
+                        if count <= 0:
+                            break
+                        out_f.write(bytes(buffer[:count]))
+                input_stream.close()
+                print(f"文件复制成功: {local_path}")
+                return local_path
+
+            except Exception as e1:
+                print(f"ContentResolver方式失败: {e1}")
+
+            # 方法2: 直接用shutil（某些设备支持直接访问）
+            try:
+                if os.path.exists(uri):
+                    shutil.copy2(uri, local_path)
+                    print(f"直接复制成功: {local_path}")
+                    return local_path
+            except Exception as e2:
+                print(f"直接复制失败: {e2}")
+
+            return None
+
+        except Exception as e:
+            print(f"复制文件失败: {e}")
+            return None
 
     def _load_audio_player(self):
-        """加载音频到播放器（使用 ffpyplayer 后端）"""
+        """加载音频到播放器"""
         try:
             if self.sound:
                 try:
@@ -408,51 +483,47 @@ class MainScreen(Screen):
 
             path = self.current_audio_path
             self.ids.status_label.text = '正在加载音频...'
+            print(f"尝试加载音频: {path}")
+            print(f"文件存在: {os.path.exists(path)}, 大小: {os.path.getsize(path) if os.path.exists(path) else 'N/A'}")
 
-            # 方式1: Kivy SoundLoader（环境变量已设为 ffpyplayer）
+            # Kivy SoundLoader（Android上用SDL2_mixer，支持mp3/ogg/wav）
             try:
                 self.sound = SoundLoader.load(path)
+                print(f"SoundLoader结果: {self.sound}")
             except Exception as e:
                 print(f"SoundLoader异常: {e}")
+                import traceback
+                traceback.print_exc()
                 self.sound = None
-
-            # 方式2: 如果 SoundLoader 失败，直接用 ffpyplayer
-            if not self.sound:
-                try:
-                    from ffpyplayer.player import MediaPlayer
-                    self.sound = _FFPyPlayerWrapper(path)
-                    print(f"使用ffpyplayer直接加载: {path}")
-                except Exception as e:
-                    print(f"ffpyplayer加载失败: {e}")
-                    self.sound = None
 
             if self.sound:
                 # 获取时长
                 duration = self._get_sound_duration()
+                print(f"音频时长: {duration}")
+
+                # 显示播放器
+                self.ids.player_area.height = dp(50)
+                self.ids.player_area.opacity = 1
+
                 if duration and duration > 0:
-                    # 显示播放器区域
-                    self.ids.player_area.height = dp(50)
-                    self.ids.player_area.opacity = 1
                     self.ids.seek_slider.max = duration
                     self.ids.time_label.text = f'0:00/{self._fmt_time(duration)}'
-                    self.ids.status_label.text = f'音频已加载 ({self._fmt_time(duration)})，可以播放或转写'
+                    self.ids.status_label.text = f'音频已加载 ({self._fmt_time(duration)})，点击播放'
                 else:
-                    self.ids.player_area.height = dp(50)
-                    self.ids.player_area.opacity = 1
-                    self.ids.status_label.text = '音频已加载（未知时长），可以播放'
+                    self.ids.seek_slider.max = 9999
+                    self.ids.time_label.text = '0:00/?:??'
+                    self.ids.status_label.text = '音频已加载，点击播放'
             else:
-                self.ids.status_label.text = '无法加载音频，请检查文件格式（支持mp3/wav/m4a/ogg）'
+                self.ids.status_label.text = '无法加载音频，格式可能不支持（支持mp3/ogg/wav）'
 
         except Exception as e:
-            self.ids.status_label.text = f'加载音频失败: {e}'
+            self.ids.status_label.text = f'加载异常: {e}'
             import traceback
             traceback.print_exc()
 
     def _get_sound_duration(self):
         """安全获取音频时长"""
         try:
-            if isinstance(self.sound, _FFPyPlayerWrapper):
-                return self.sound.length
             d = getattr(self.sound, 'length', 0)
             return d if d and d > 0 else 0
         except Exception:
@@ -461,8 +532,6 @@ class MainScreen(Screen):
     def _get_sound_pos(self):
         """安全获取当前播放位置"""
         try:
-            if isinstance(self.sound, _FFPyPlayerWrapper):
-                return self.sound.get_pos()
             return self.sound.get_pos()
         except Exception:
             return 0
@@ -924,58 +993,6 @@ class CollectionScreen(Screen):
 
 
 # ── 应用 ──
-# ── ffpyplayer 包装器（兼容 Kivy SoundLoader 接口）──
-class _FFPyPlayerWrapper:
-    """将 ffpyplayer.MediaPlayer 包装成 Kivy SoundLoader 兼容接口"""
-
-    def __init__(self, filepath):
-        from ffpyplayer.player import MediaPlayer
-        self._player = MediaPlayer(filepath)
-        self._filepath = filepath
-        self._paused = True
-        self._duration = 0.0
-        # 等待获取时长
-        import time as _time
-        for _ in range(30):  # 最多等3秒
-            _time.sleep(0.1)
-            try:
-                dur = self._player.get_metadata().get('duration', 0)
-                if dur and dur > 0:
-                    self._duration = float(dur)
-                    break
-            except Exception:
-                pass
-
-    @property
-    def length(self):
-        return self._duration
-
-    def play(self):
-        self._player.set_pause(False)
-        self._paused = False
-
-    def stop(self):
-        self._player.set_pause(True)
-        self._paused = True
-
-    def unload(self):
-        try:
-            self._player.close_player()
-        except Exception:
-            pass
-
-    def get_pos(self):
-        try:
-            return self._player.get_pts()
-        except Exception:
-            return 0.0
-
-    def seek(self, position):
-        try:
-            self._player.seek(position, relative=False, accurate=True)
-        except Exception:
-            pass
-
 
 class DeutschLernenApp(App):
 

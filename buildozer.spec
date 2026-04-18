@@ -19,11 +19,11 @@ source.include_exts = py,png,jpg,kv,atlas,json,md,txt,ttf,otf
 source.include_patterns = resources/*,src/*,config.json,fonts/*
 
 # (str) Application versioning (method 1)
-version = 0.4.0
+version = 0.5.0
 
 # (list) Application requirements
 # 这里列出应用需要的Python包
-requirements = python3,kivy==2.3.0,pyjnius,android,plyer,requests,openai,pillow,ffpyplayer
+requirements = python3,kivy==2.3.0,pyjnius,android,plyer,requests,openai,pillow
 
 # (str) Supported orientation (one of landscape, portrait or all)
 orientation = portrait
