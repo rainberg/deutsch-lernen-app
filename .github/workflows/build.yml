@@ -21,9 +21,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            openjdk-17-jdk autoconf libtool libtool-bin pkg-config \
+            openjdk-17-jdk autoconf automake libtool libtool-bin \
+            autoconf-archive libltdl-dev pkg-config \
             zlib1g-dev libncurses5-dev cmake libffi-dev \
-            libssl-dev lld zip unzip automake
+            libssl-dev lld zip unzip
           
       - name: Install Python dependencies
         run: pip install buildozer cython==0.29.37
