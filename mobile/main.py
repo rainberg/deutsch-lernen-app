@@ -1,7 +1,6 @@
 """
-德语学习助手 - 安卓版 v0.5
-音频播放 + 句子同步 + 转写 + 翻译 + 收藏 + Anki导出
-修复：Android content:// URI 处理 + 音频播放稳定性
+德语学习助手 v1.0 - Android版
+三页面架构：文件浏览 → 播放学习 → 收藏管理
 """
 
 import os
@@ -20,14 +19,15 @@ from kivy.uix.popup import Popup
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.slider import Slider
 from kivy.uix.gridlayout import GridLayout
+from kivy.uix.filechooser import FileChooserListView
 from kivy.core.window import Window
 from kivy.utils import platform
 from kivy.clock import Clock
 from kivy.storage.jsonstore import JsonStore
 from kivy.core.clipboard import Clipboard
 from kivy.core.audio import SoundLoader
+from kivy.properties import ListProperty, StringProperty, BooleanProperty
 import threading
-import json
 import time
 import re
 
@@ -35,608 +35,492 @@ import re
 API_KEY = "fk2014...9vDm"
 API_BASE = "https://openai.api2d.net/v1"
 
-# ── 字体路径 ──
+# ── 字体 ──
 FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts', 'ChineseSubset.ttf')
 FONT_NAME = 'ChineseFont'
 
-# ── KV 界面定义 ──
+# ── Android存储路径 ──
+def get_storage_dir():
+    if platform == 'android':
+        try:
+            from android.storage import app_storage_path
+            return app_storage_path()
+        except Exception:
+            pass
+    return os.path.dirname(os.path.abspath(__file__))
+
+def get_music_dir():
+    if platform == 'android':
+        try:
+            from android.storage import primary_external_storage_path
+            return primary_external_storage_path()
+        except Exception:
+            pass
+    return '/storage/emulated/0'
+
+# ── KV 界面 ──
+F = FONT_NAME  # 简写
+
 KV = '''
 #:import dp kivy.metrics.dp
 #:import sp kivy.metrics.sp
+#:import os os
 
-<CustomLabel@Label>:
-    font_name: "''' + FONT_NAME + '''"
-    color: 0.15, 0.15, 0.15, 1
+<CT@Label>:
+    font_name: "''' + F + '''"
+    color: 0.12, 0.12, 0.12, 1
 
-<CustomButton@Button>:
-    font_name: "''' + FONT_NAME + '''"
+<CB@Button>:
+    font_name: "''' + F + '''"
     font_size: '14sp'
 
-<CustomTextInput@TextInput>:
-    font_name: "''' + FONT_NAME + '''"
-    font_size: '15sp'
-    foreground_color: 0.15, 0.15, 0.15, 1
-    background_color: 1, 1, 1, 1
-    cursor_color: 0.2, 0.6, 0.8, 1
+<CTI@TextInput>:
+    font_name: "''' + F + '''"
+    font_size: '14sp'
+    foreground_color: 0.12, 0.12, 0.12, 1
+    background_color: 0.98, 0.98, 0.98, 1
 
-<SentenceButton>:
-    font_name: "''' + FONT_NAME + '''"
-    font_size: '15sp'
-    background_color: 0.96, 0.96, 0.96, 1
-    color: 0.1, 0.1, 0.1, 1
+<SentenceRow>:
     size_hint_y: None
-    height: dp(72)
-    halign: 'left'
-    valign: 'top'
-    text_size: self.width - dp(16), None
-    padding: [dp(8), dp(6)]
-    background_normal: ''
+    height: dp(70)
+    padding: [dp(8), dp(4)]
     canvas.before:
         Color:
-            rgba: self.border_color
+            rgba: self.bg_color
         RoundedRectangle:
-            pos: self.x, self.y
-            size: self.width, self.height
+            pos: self.pos
+            size: self.size
             radius: [dp(6),]
-        Color:
-            rgba: self.highlight_color
-        RoundedRectangle:
-            pos: self.x + dp(2), self.y + dp(2)
-            size: self.width - dp(4), self.height - dp(4)
-            radius: [dp(4),]
-
-<MainScreen>:
-    name: 'main'
 
     BoxLayout:
         orientation: 'vertical'
-        padding: dp(10)
-        spacing: dp(6)
+        spacing: dp(2)
 
-        # ── 标题栏 ──
+        CT:
+            id: time_lbl
+            text: root.time_text
+            font_size: '11sp'
+            color: 0.4, 0.4, 0.4, 1
+            size_hint_y: None
+            height: dp(18)
+            halign: 'left'
+            text_size: self.size
+
+        CT:
+            id: text_lbl
+            text: root.german_text
+            font_size: '15sp'
+            size_hint_y: None
+            height: dp(22)
+            halign: 'left'
+            text_size: self.width, None
+
+        CT:
+            id: cn_lbl
+            text: root.chinese_text
+            font_size: '12sp'
+            color: 0.35, 0.35, 0.35, 1
+            size_hint_y: None
+            height: dp(18)
+            halign: 'left'
+            text_size: self.width, None
+
+# ═══════════ 页面1: 文件浏览 ═══════════
+<BrowseScreen>:
+    name: 'browse'
+    BoxLayout:
+        orientation: 'vertical'
+
+        # 顶栏
         BoxLayout:
             size_hint_y: None
-            height: dp(42)
+            height: dp(48)
+            padding: [dp(10), 0]
+            canvas.before:
+                Color:
+                    rgba: 0.15, 0.45, 0.7, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
 
-            CustomLabel:
-                text: '德语学习助手'
-                font_size: '20sp'
+            CT:
+                text: '选择音频文件'
+                font_size: '18sp'
                 bold: True
-                halign: 'left'
-                text_size: self.size
-                color: 0.15, 0.45, 0.7, 1
+                color: 1, 1, 1, 1
 
-            CustomButton:
+            CB:
                 text: '收藏'
                 size_hint_x: None
                 width: dp(55)
-                background_color: 0.3, 0.5, 0.8, 1
-                on_press: root.show_collection()
+                color: 1, 1, 1, 1
+                background_color: 0, 0, 0, 0
+                on_press: app.root.current = 'collection'
 
-        # ── 功能按钮 ──
+        # 快捷路径按钮
         BoxLayout:
             size_hint_y: None
-            height: dp(42)
-            spacing: dp(6)
-
-            CustomButton:
-                text: '导入音频'
-                background_color: 0.2, 0.7, 0.3, 1
-                on_press: root.import_audio()
-
-            CustomButton:
-                text: '开始转写'
-                background_color: 0.9, 0.55, 0.1, 1
-                on_press: root.start_transcribe()
-
-            CustomButton:
-                text: '导出Anki'
-                background_color: 0.6, 0.3, 0.8, 1
-                on_press: root.export_anki()
-
-        # ── 音频播放器 ──
-        BoxLayout:
-            id: player_area
-            size_hint_y: None
-            height: dp(0)
-            opacity: 0
-            orientation: 'vertical'
+            height: dp(38)
             spacing: dp(4)
+            padding: [dp(6), dp(2)]
 
-            # 播放控制
+            CB:
+                text: '下载目录'
+                font_size: '12sp'
+                on_press: root.goto_downloads()
+                background_color: 0.85, 0.85, 0.85, 1
+                color: 0.2, 0.2, 0.2, 1
+
+            CB:
+                text: '音乐目录'
+                font_size: '12sp'
+                on_press: root.goto_music()
+                background_color: 0.85, 0.85, 0.85, 1
+                color: 0.2, 0.2, 0.2, 1
+
+            CB:
+                text: '根目录'
+                font_size: '12sp'
+                on_press: root.goto_root()
+                background_color: 0.85, 0.85, 0.85, 1
+                color: 0.2, 0.2, 0.2, 1
+
+        # 文件选择器
+        FileChooserListView:
+            id: file_chooser
+            filters: ['*.mp3', '*.wav', '*.ogg', '*.m4a', '*.flac', '*.wma', '*.aac', '*.mp4', '*.webm']
+            on_selection: root.on_file_selected(self.selection)
+
+        # 底部状态
+        BoxLayout:
+            size_hint_y: None
+            height: dp(48)
+            padding: [dp(10), dp(4)]
+
+            CT:
+                id: browse_status
+                text: '请选择音频或视频文件'
+                font_size: '13sp'
+                color: 0.4, 0.4, 0.4, 1
+
+# ═══════════ 页面2: 播放学习 ═══════════
+<StudyScreen>:
+    name: 'study'
+    BoxLayout:
+        orientation: 'vertical'
+
+        # 顶栏
+        BoxLayout:
+            size_hint_y: None
+            height: dp(48)
+            padding: [dp(10), 0]
+            canvas.before:
+                Color:
+                    rgba: 0.15, 0.45, 0.7, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+
+            CB:
+                text: '< 返回'
+                size_hint_x: None
+                width: dp(65)
+                color: 1, 1, 1, 1
+                background_color: 0, 0, 0, 0
+                on_press: root.go_back()
+
+            CT:
+                id: study_title
+                text: '学习'
+                font_size: '16sp'
+                bold: True
+                color: 1, 1, 1, 1
+                halign: 'center'
+
+        # ── 播放控制 ──
+        BoxLayout:
+            size_hint_y: None
+            height: dp(88)
+            orientation: 'vertical'
+            padding: [dp(10), dp(4)]
+            spacing: dp(2)
+            canvas.before:
+                Color:
+                    rgba: 0.96, 0.96, 0.96, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+
+            # 进度条
+            Slider:
+                id: seek_slider
+                size_hint_y: None
+                height: dp(28)
+                min: 0
+                max: 100
+                value: 0
+                cursor_size: (dp(16), dp(16))
+                on_touch_up: root.on_seek(self, args[1])
+
+            # 按钮行
             BoxLayout:
                 size_hint_y: None
                 height: dp(42)
                 spacing: dp(8)
 
-                CustomButton:
+                CB:
                     id: play_btn
                     text: '播放'
-                    size_hint_x: None
-                    width: dp(70)
-                    background_color: 0.2, 0.6, 0.8, 1
                     on_press: root.toggle_play()
+                    background_color: 0.2, 0.6, 0.8, 1
 
-                CustomButton:
-                    id: stop_btn
+                CB:
                     text: '停止'
-                    size_hint_x: None
-                    width: dp(55)
-                    background_color: 0.5, 0.5, 0.5, 1
                     on_press: root.stop_audio()
+                    background_color: 0.5, 0.5, 0.5, 1
 
-                Slider:
-                    id: seek_slider
-                    min: 0
-                    max: 100
-                    value: 0
-                    on_touch_up: root.on_slider_seek(self, args[1]) if self.collide_point(*args[1].pos) else None
-
-                CustomLabel:
+                CT:
                     id: time_label
-                    text: '0:00/0:00'
-                    size_hint_x: None
-                    width: dp(90)
-                    font_size: '12sp'
+                    text: '0:00 / 0:00'
+                    font_size: '13sp'
                     halign: 'right'
-
-        # ── 句子列表（带时间轴同步）──
-        BoxLayout:
-            orientation: 'vertical'
-            spacing: dp(3)
-
-            CustomLabel:
-                text: '转写句子（点击播放对应音频）'
-                size_hint_y: None
-                height: dp(22)
-                halign: 'left'
-                text_size: self.size
-                font_size: '12sp'
-                color: 0.45, 0.45, 0.45, 1
-
-            ScrollView:
-                id: sentence_scroll
-                do_scroll_x: False
-                GridLayout:
-                    id: sentence_list
-                    cols: 1
-                    size_hint_y: None
-                    height: self.minimum_height
-                    spacing: dp(5)
-
-        # ── 中文翻译区 ──
-        BoxLayout:
-            orientation: 'vertical'
-            spacing: dp(3)
-            size_hint_y: None
-            height: dp(110)
-
-            CustomLabel:
-                text: '中文翻译'
-                size_hint_y: None
-                height: dp(22)
-                halign: 'left'
-                text_size: self.size
-                font_size: '12sp'
-                color: 0.45, 0.45, 0.45, 1
-
-            ScrollView:
-                CustomTextInput:
-                    id: chinese_text
-                    hint_text: '中文翻译将显示在这里...'
-                    multiline: True
-                    readonly: True
-                    size_hint_y: None
-                    height: max(self.minimum_height, dp(80))
+                    size_hint_x: None
+                    width: dp(110)
 
         # ── 操作按钮 ──
         BoxLayout:
             size_hint_y: None
-            height: dp(42)
+            height: dp(40)
             spacing: dp(6)
+            padding: [dp(10), dp(2)]
 
-            CustomButton:
-                text: '收藏句子'
+            CB:
+                text: '开始转写'
+                on_press: root.start_transcribe()
+                background_color: 0.9, 0.55, 0.1, 1
+                font_size: '13sp'
+
+            CB:
+                text: '收藏当前句'
+                on_press: root.collect_current()
                 background_color: 0.3, 0.5, 0.8, 1
-                on_press: root.collect_sentence()
+                font_size: '13sp'
 
-            CustomButton:
-                text: '复制文本'
-                background_color: 0.5, 0.5, 0.5, 1
-                on_press: root.copy_text()
+            CB:
+                text: '收藏全部'
+                on_press: root.collect_all()
+                background_color: 0.4, 0.6, 0.9, 1
+                font_size: '13sp'
 
-            CustomButton:
-                text: '清空'
-                background_color: 0.8, 0.3, 0.3, 1
-                on_press: root.clear_all()
+            CB:
+                text: '导出Anki'
+                on_press: root.export_anki()
+                background_color: 0.6, 0.3, 0.8, 1
+                font_size: '13sp'
 
         # ── 进度条 ──
         ProgressBar:
-            id: progress
+            id: transcribe_progress
             size_hint_y: None
             height: dp(3)
             opacity: 0
             max: 100
 
-        # ── 状态栏 ──
-        CustomLabel:
-            id: status_label
-            text: '就绪'
+        # ── 状态 ──
+        CT:
+            id: study_status
+            text: ''
             size_hint_y: None
             height: dp(22)
             font_size: '11sp'
             color: 0.5, 0.5, 0.5, 1
+            padding: [dp(10), 0]
 
-<CollectionScreen>:
-    name: 'collection'
-
-    BoxLayout:
-        orientation: 'vertical'
-        padding: dp(10)
-        spacing: dp(6)
-
-        BoxLayout:
-            size_hint_y: None
-            height: dp(42)
-
-            CustomButton:
-                text: '< 返回'
-                size_hint_x: None
-                width: dp(65)
-                background_color: 0.5, 0.5, 0.5, 1
-                on_press: root.go_back()
-
-            CustomLabel:
-                text: '收藏列表'
-                font_size: '18sp'
-                bold: True
-                halign: 'center'
-
-            CustomButton:
-                text: '清空'
-                size_hint_x: None
-                width: dp(55)
-                background_color: 0.8, 0.3, 0.3, 1
-                on_press: root.clear_collection()
-
+        # ── 句子列表 ──
         ScrollView:
+            id: sentence_scroll
             GridLayout:
-                id: collection_list
+                id: sentence_list
                 cols: 1
                 size_hint_y: None
                 height: self.minimum_height
-                spacing: dp(5)
+                spacing: dp(4)
+                padding: [dp(8), dp(4)]
+
+# ═══════════ 页面3: 收藏管理 ═══════════
+<CollectionScreen>:
+    name: 'collection'
+    BoxLayout:
+        orientation: 'vertical'
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(48)
+            padding: [dp(10), 0]
+            canvas.before:
+                Color:
+                    rgba: 0.15, 0.45, 0.7, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+
+            CB:
+                text: '< 返回'
+                size_hint_x: None
+                width: dp(65)
+                color: 1, 1, 1, 1
+                background_color: 0, 0, 0, 0
+                on_press: app.root.current = 'study'
+
+            CT:
+                text: '收藏列表'
+                font_size: '18sp'
+                bold: True
+                color: 1, 1, 1, 1
+                halign: 'center'
+
+            CB:
+                text: '清空'
+                size_hint_x: None
+                width: dp(50)
+                color: 1, 1, 1, 1
+                background_color: 0, 0, 0, 0
+                on_press: root.clear_all()
+
+        ScrollView:
+            GridLayout:
+                id: coll_list
+                cols: 1
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(4)
+                padding: [dp(8), dp(4)]
 '''
 
 Builder.load_string(KV)
 
 
-# ── 句子按钮（支持高亮） ──
-from kivy.properties import ListProperty
+# ═══════════ 句子行组件 ═══════════
+class SentenceRow(BoxLayout):
+    time_text = StringProperty('')
+    german_text = StringProperty('')
+    chinese_text = StringProperty('')
+    bg_color = ListProperty([0.96, 0.96, 0.96, 1])
 
-class SentenceButton(Button):
-    highlight_color = ListProperty([0, 0, 0, 0])       # 当前播放高亮
-    border_color = ListProperty([0.85, 0.85, 0.85, 1])  # 边框
-
-    def __init__(self, segment_data=None, **kwargs):
+    def __init__(self, seg_data=None, **kwargs):
         super().__init__(**kwargs)
-        self.segment_data = segment_data  # {start, end, text, chinese}
-        self.is_playing = False
-        self.background_normal = ''
+        self.seg_data = seg_data or {}
+        self.is_highlighted = False
 
     def set_highlight(self, active):
-        self.is_playing = active
+        self.is_highlighted = active
         if active:
-            self.highlight_color = [0.85, 0.93, 1.0, 1]   # 淡蓝高亮
-            self.border_color = [0.2, 0.6, 0.9, 1]        # 蓝色边框
-            self.color = [0.05, 0.05, 0.05, 1]
+            self.bg_color = [0.85, 0.93, 1.0, 1]
         else:
-            self.highlight_color = [0, 0, 0, 0]
-            self.border_color = [0.85, 0.85, 0.85, 1]
-            self.color = [0.1, 0.1, 0.1, 1]
+            self.bg_color = [0.96, 0.96, 0.96, 1]
 
 
-# ── 主屏幕 ──
-class MainScreen(Screen):
+# ═══════════ 页面1: 文件浏览 ═══════════
+class BrowseScreen(Screen):
+
+    def on_enter(self):
+        # 默认跳到下载目录
+        self.goto_downloads()
+
+    def goto_downloads(self):
+        dl = os.path.join(get_music_dir(), 'Download')
+        if os.path.exists(dl):
+            self.ids.file_chooser.path = dl
+        else:
+            self.ids.file_chooser.path = get_music_dir()
+
+    def goto_music(self):
+        music = os.path.join(get_music_dir(), 'Music')
+        if os.path.exists(music):
+            self.ids.file_chooser.path = music
+        else:
+            self.ids.file_chooser.path = get_music_dir()
+
+    def goto_root(self):
+        if platform == 'android':
+            self.ids.file_chooser.path = '/storage/emulated/0'
+        else:
+            self.ids.file_chooser.path = '/'
+
+    def on_file_selected(self, selection):
+        if not selection:
+            return
+        filepath = selection[0]
+        if not os.path.isfile(filepath):
+            return
+
+        filename = os.path.basename(filepath)
+        size_kb = os.path.getsize(filepath) // 1024
+        self.ids.browse_status.text = f'已选择: {filename} ({size_kb}KB)'
+
+        # 跳转到学习页面并加载
+        app = App.get_running_app()
+        study = app.root.get_screen('study')
+        study.load_file(filepath)
+        app.root.current = 'study'
+
+
+# ═══════════ 页面2: 播放学习 ═══════════
+class StudyScreen(Screen):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.current_audio_path = None
+        self.audio_path = None
         self.sound = None
-        self.segments = []           # [{start, end, text, chinese}, ...]
-        self.sentence_buttons = []
-        self.current_segment_idx = -1
+        self.segments = []
+        self.sentence_rows = []
+        self.current_seg_idx = -1
         self.is_playing = False
         self.update_event = None
-        self.collected_sentences = []
-        self.store = None
-        self._slider_dragging = False
-        self.init_storage()
 
-    # ─── 存储 ───
-    def init_storage(self):
+    def load_file(self, filepath):
+        """加载音频文件"""
+        self.audio_path = filepath
+        filename = os.path.basename(filepath)
+        self.ids.study_title.text = filename[:25]
+
+        # 停止之前的播放
+        self._stop_playback()
+
+        # 清空旧句子
+        self.ids.sentence_list.clear_widgets()
+        self.sentence_rows = []
+        self.segments = []
+        self.current_seg_idx = -1
+
+        # 加载音频
+        self.ids.study_status.text = '正在加载音频...'
         try:
-            if platform == 'android':
-                from android.storage import app_storage_path
-                path = os.path.join(app_storage_path(), 'sentences.json')
-            else:
-                path = os.path.join(os.path.dirname(__file__), 'sentences.json')
-            self.store = JsonStore(path)
-            for key in self.store:
-                item = self.store.get(key)
-                self.collected_sentences.append({
-                    'german': item.get('german', ''),
-                    'chinese': item.get('chinese', '')
-                })
-        except Exception as e:
-            print(f"存储初始化失败: {e}")
-            self.store = None
-
-    # ─── 导入音频 ───
-    def import_audio(self):
-        if platform == 'android':
-            try:
-                from plyer import filechooser
-                filechooser.open_file(
-                    on_selection=self.on_audio_selected,
-                    filters=["*.mp3", "*.wav", "*.m4a", "*.ogg", "*.mp4", "*.flac", "*.webm"]
-                )
-            except Exception as e:
-                self.ids.status_label.text = f'文件选择器错误: {e}'
-        else:
-            self.ids.status_label.text = '请在安卓设备上使用文件选择器'
-
-    def on_audio_selected(self, selection):
-        """处理选择的文件"""
-        if not selection:
-            return
-
-        raw_path = selection[0]
-        filename = os.path.basename(raw_path) if '/' in raw_path else 'audio'
-
-        # 显示进度条并启动动画
-        self.ids.progress.opacity = 1
-        self.ids.progress.value = 0
-        self.ids.status_label.text = f'已选择: {filename}，准备导入...'
-
-        # 启动平滑进度动画（0→95%缓慢推进，实际完成后跳到100%）
-        self._anim_progress = 0
-        self._anim_event = Clock.schedule_interval(self._animate_progress, 0.15)
-
-        # 后台线程处理
-        thread = threading.Thread(target=self._import_thread, args=(raw_path,))
-        thread.daemon = True
-        thread.start()
-
-    def _animate_progress(self, dt):
-        """平滑进度动画（模拟加载感）"""
-        if self._anim_progress < 90:
-            # 慢慢推进到90%
-            step = max(1, (90 - self._anim_progress) // 8)
-            self._anim_progress = min(90, self._anim_progress + step)
-            self.ids.progress.value = self._anim_progress
-
-    def _stop_animation(self, final_value):
-        """停止动画并设置最终值"""
-        if hasattr(self, '_anim_event') and self._anim_event:
-            self._anim_event.cancel()
-            self._anim_event = None
-        self.ids.progress.value = final_value
-
-    def _import_thread(self, raw_path):
-        """后台导入线程"""
-        try:
-            is_android = platform == 'android'
-
-            # 步骤1: 复制文件
-            if is_android and raw_path.startswith('content://'):
-                self._tick_progress_msg('正在读取文件...')
-                local_path = self._copy_content_uri_to_local(raw_path)
-                if not local_path:
-                    self._tick_fail('复制失败，请重试')
-                    return
-                self.current_audio_path = local_path
-            else:
-                self.current_audio_path = raw_path
-
-            # 步骤2: 加载播放器
-            self._tick_progress_msg('正在加载播放器...')
-
-            # 在主线程加载音频（SoundLoader必须在主线程）
-            done = threading.Event()
-            def load_on_main():
-                try:
-                    self._load_audio_player()
-                except Exception as e:
-                    print(f"_load_audio_player异常: {e}")
-                finally:
-                    done.set()
-            Clock.schedule_once(lambda dt: load_on_main(), 0)
-            done.wait(timeout=15)
-
-            # 步骤3: 完成
-            self._tick_done()
-
-        except Exception as e:
-            print(f"导入异常: {e}")
-            import traceback
-            traceback.print_exc()
-            self._tick_fail(f'导入失败: {e}')
-
-    def _tick_progress_msg(self, msg):
-        """仅更新状态文字（进度由动画驱动）"""
-        Clock.schedule_once(lambda dt: setattr(self.ids.status_label, 'text', msg), 0)
-
-    def _tick_done(self):
-        """导入完成"""
-        def finish(dt):
-            self._stop_animation(100)
-            self.ids.progress.opacity = 0
-        Clock.schedule_once(finish, 0)
-
-    def _tick_fail(self, msg):
-        """导入失败"""
-        def fail(dt):
-            self._stop_animation(0)
-            self.ids.status_label.text = msg
-            Clock.schedule_once(lambda dt2: setattr(self.ids.progress, 'opacity', 0), 2)
-        Clock.schedule_once(fail, 0)
-
-    def _copy_content_uri_to_local(self, uri):
-        """将Android content:// URI复制到应用本地存储"""
-        try:
-            import shutil
-
-            # 获取应用私有目录
-            from android.storage import app_storage_path
-            local_dir = app_storage_path()
-
-            # 从URI提取文件名
-            filename = 'audio_import'
-            if '/' in uri:
-                parts = uri.split('/')
-                for part in reversed(parts):
-                    if '.' in part and len(part) > 3:
-                        filename = part
-                        break
-
-            local_path = os.path.join(local_dir, filename)
-
-            # 方法1: 用Android ContentResolver复制
-            try:
-                from jnius import autoclass, cast
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                context = PythonActivity.mActivity
-                ContentResolver = context.getContentResolver()
-                Uri = autoclass('android.net.Uri')
-                uri_obj = Uri.parse(uri)
-                input_stream = ContentResolver.openInputStream(uri_obj)
-
-                # 获取文件大小（用于进度显示）
-                total_size = 0
-                try:
-                    total_size = ContentResolver.openFileDescriptor(uri_obj, "r").getStatSize()
-                except Exception:
-                    pass
-
-                # 读取并写入本地文件（带进度）
-                copied = 0
-                buf_size = 8192
-                with open(local_path, 'wb') as out_f:
-                    buffer = jarray('b')(buf_size)
-                    while True:
-                        count = input_stream.read(buffer)
-                        if count <= 0:
-                            break
-                        out_f.write(bytes(buffer[:count]))
-                        copied += count
-
-                        # 更新复制进度（20%~55%区间）
-                        if total_size > 0:
-                            pct = 20 + int(35 * copied / total_size)
-                            Clock.schedule_once(
-                                lambda dt, p=pct, c=copied, t=total_size:
-                                    self._set_progress(p, f'已复制 {c//1024}KB / {t//1024}KB'),
-                                0
-                            )
-
-                input_stream.close()
-                print(f"文件复制成功: {local_path} ({copied} bytes)")
-                return local_path
-
-            except Exception as e1:
-                print(f"ContentResolver方式失败: {e1}")
-
-            # 方法2: 直接用shutil（某些设备支持直接访问）
-            try:
-                if os.path.exists(uri):
-                    shutil.copy2(uri, local_path)
-                    print(f"直接复制成功: {local_path}")
-                    return local_path
-            except Exception as e2:
-                print(f"直接复制失败: {e2}")
-
-            return None
-
-        except Exception as e:
-            print(f"复制文件失败: {e}")
-            return None
-
-    def _load_audio_player(self):
-        """加载音频到播放器"""
-        try:
+            self.sound = SoundLoader.load(filepath)
             if self.sound:
-                try:
-                    self.sound.stop()
-                    self.sound.unload()
-                except Exception:
-                    pass
-                self.sound = None
-
-            path = self.current_audio_path
-            self.ids.status_label.text = '正在加载音频...'
-            print(f"尝试加载音频: {path}")
-            print(f"文件存在: {os.path.exists(path)}, 大小: {os.path.getsize(path) if os.path.exists(path) else 'N/A'}")
-
-            # Kivy SoundLoader（Android上用SDL2_mixer，支持mp3/ogg/wav）
-            try:
-                self.sound = SoundLoader.load(path)
-                print(f"SoundLoader结果: {self.sound}")
-            except Exception as e:
-                print(f"SoundLoader异常: {e}")
-                import traceback
-                traceback.print_exc()
-                self.sound = None
-
-            if self.sound:
-                # 获取时长
-                duration = self._get_sound_duration()
-                print(f"音频时长: {duration}")
-
-                # 显示播放器
-                self.ids.player_area.height = dp(50)
-                self.ids.player_area.opacity = 1
-
-                if duration and duration > 0:
+                duration = self._get_duration()
+                if duration > 0:
                     self.ids.seek_slider.max = duration
-                    self.ids.time_label.text = f'0:00/{self._fmt_time(duration)}'
-                    file_size = os.path.getsize(path) // 1024
-                    self.ids.status_label.text = f'已加载 ({self._fmt_time(duration)}, {file_size}KB)，点击播放'
+                    self.ids.time_label.text = f'0:00 / {self._fmt(duration)}'
+                    self.ids.study_status.text = f'已加载 {filename} ({self._fmt(duration)})，可播放或转写'
                 else:
                     self.ids.seek_slider.max = 9999
-                    self.ids.time_label.text = '0:00/?:??'
-                    self.ids.status_label.text = '音频已加载，点击播放'
+                    self.ids.time_label.text = '0:00 / ?:??'
+                    self.ids.study_status.text = f'已加载 {filename}，可播放'
             else:
-                self.ids.status_label.text = '无法加载音频，格式可能不支持（支持mp3/ogg/wav）'
-
+                self.ids.study_status.text = f'无法加载 {filename}，格式可能不支持'
         except Exception as e:
-            self.ids.status_label.text = f'加载异常: {e}'
+            self.ids.study_status.text = f'加载失败: {e}'
             import traceback
             traceback.print_exc()
 
-    def _get_sound_duration(self):
-        """安全获取音频时长"""
-        try:
-            d = getattr(self.sound, 'length', 0)
-            return d if d and d > 0 else 0
-        except Exception:
-            return 0
-
-    def _get_sound_pos(self):
-        """安全获取当前播放位置"""
-        try:
-            return self.sound.get_pos()
-        except Exception:
-            return 0
-
-    # ─── 播放控制 ───
+    # ── 播放控制 ──
     def toggle_play(self):
         if not self.sound:
-            self.ids.status_label.text = '请先导入音频'
+            self.ids.study_status.text = '请先选择音频文件'
             return
 
         if self.is_playing:
-            # 暂停
             try:
                 self.sound.stop()
             except Exception:
@@ -648,17 +532,22 @@ class MainScreen(Screen):
                 self.update_event = None
             self._clear_highlights()
         else:
-            # 播放
             try:
                 self.sound.play()
                 self.is_playing = True
                 self.ids.play_btn.text = '暂停'
-                self.update_event = Clock.schedule_interval(self._update_playback, 0.15)
-                self.ids.status_label.text = '播放中...'
+                self.update_event = Clock.schedule_interval(self._tick, 0.15)
+                self.ids.study_status.text = '播放中...'
             except Exception as e:
-                self.ids.status_label.text = f'播放失败: {e}'
+                self.ids.study_status.text = f'播放失败: {e}'
 
     def stop_audio(self):
+        self._stop_playback()
+        self.ids.time_label.text = f'0:00 / {self._fmt(self._get_duration())}'
+        self.ids.seek_slider.value = 0
+        self._clear_highlights()
+
+    def _stop_playback(self):
         if self.sound:
             try:
                 self.sound.stop()
@@ -666,128 +555,88 @@ class MainScreen(Screen):
                 pass
         self.is_playing = False
         self.ids.play_btn.text = '播放'
-        self.ids.seek_slider.value = 0
         if self.update_event:
             self.update_event.cancel()
             self.update_event = None
-        self._clear_highlights()
-        dur = self._get_sound_duration()
-        self.ids.time_label.text = f'0:00/{self._fmt_time(dur)}'
 
-    def _update_playback(self, dt):
-        """定时更新播放进度和句子高亮"""
+    def _tick(self, dt):
+        """播放定时器"""
         if not self.sound or not self.is_playing:
             return
-
         try:
-            pos = self._get_sound_pos()
-            duration = self._get_sound_duration()
+            pos = self.sound.get_pos()
+            dur = self._get_duration()
         except Exception:
             return
 
-        if duration <= 0:
-            return
+        self.ids.seek_slider.value = pos
+        self.ids.time_label.text = f'{self._fmt(pos)} / {self._fmt(dur)}'
+        self._highlight_at(pos)
 
-        # 更新进度条
-        if not self._slider_dragging:
-            self.ids.seek_slider.value = pos
-
-        # 更新时间显示
-        self.ids.time_label.text = f'{self._fmt_time(pos)}/{self._fmt_time(duration)}'
-
-        # 高亮当前句子
-        self._highlight_at_time(pos)
-
-        # 播放结束
-        if pos >= duration - 0.2:
-            self.is_playing = False
-            self.ids.play_btn.text = '播放'
-            if self.update_event:
-                self.update_event.cancel()
-                self.update_event = None
+        if dur > 0 and pos >= dur - 0.3:
+            self._stop_playback()
             self._clear_highlights()
-            self.ids.status_label.text = '播放完成'
+            self.ids.study_status.text = '播放完成'
 
-    def on_slider_seek(self, slider, touch):
-        """拖拽进度条跳转"""
+    def on_seek(self, slider, touch):
         if slider.collide_point(*touch.pos) and self.sound:
             try:
                 self.sound.seek(slider.value)
-                self._highlight_at_time(slider.value)
+                self._highlight_at(slider.value)
             except Exception:
                 pass
 
-    def _highlight_at_time(self, pos):
-        """根据播放位置高亮对应句子"""
-        new_idx = -1
+    def _highlight_at(self, pos):
+        idx = -1
         for i, seg in enumerate(self.segments):
             if seg['start'] <= pos < seg['end']:
-                new_idx = i
+                idx = i
                 break
-
-        if new_idx != self.current_segment_idx:
-            # 取消旧高亮
-            if 0 <= self.current_segment_idx < len(self.sentence_buttons):
-                self.sentence_buttons[self.current_segment_idx].set_highlight(False)
-
-            # 设置新高亮
-            if 0 <= new_idx < len(self.sentence_buttons):
-                self.sentence_buttons[new_idx].set_highlight(True)
-                # 自动滚动到当前句子
-                self._scroll_to_sentence(new_idx)
-
-            self.current_segment_idx = new_idx
-
-    def _scroll_to_sentence(self, idx):
-        """自动滚动ScrollView使当前句子可见"""
-        try:
-            scroll = self.ids.sentence_scroll
-            btn = self.sentence_buttons[idx]
-            # 计算按钮在GridLayout中的位置
-            layout = self.ids.sentence_list
-            # 按钮在列表中的y位置（从底部算起）
-            btn_y = sum(c.height + layout.spacing for c in list(layout.children)[len(layout.children)-1-idx:])
-
-            # scroll_view的高度
-            view_height = scroll.height
-            content_height = layout.height
-
-            # 计算scroll_y (0=底部, 1=顶部)
-            target_scroll_y = max(0, min(1, (btn_y - view_height * 0.3) / (content_height - view_height + 1)))
-            # 平滑滚动
-            scroll.scroll_y = 1 - target_scroll_y
-        except Exception:
-            pass
+        if idx != self.current_seg_idx:
+            if 0 <= self.current_seg_idx < len(self.sentence_rows):
+                self.sentence_rows[self.current_seg_idx].set_highlight(False)
+            if 0 <= idx < len(self.sentence_rows):
+                self.sentence_rows[idx].set_highlight(True)
+                # 自动滚动
+                try:
+                    sv = self.ids.sentence_scroll
+                    row = self.sentence_rows[idx]
+                    layout = self.ids.sentence_list
+                    # 简单滚动：设置scroll_y
+                    total = layout.height
+                    if total > sv.height:
+                        row_pos = sum(c.height + layout.spacing for c in list(layout.children)[len(layout.children)-1-idx:])
+                        sv.scroll_y = max(0, min(1, 1 - (row_pos / total)))
+                except Exception:
+                    pass
+            self.current_seg_idx = idx
 
     def _clear_highlights(self):
-        for btn in self.sentence_buttons:
-            btn.set_highlight(False)
-        self.current_segment_idx = -1
+        for row in self.sentence_rows:
+            row.set_highlight(False)
+        self.current_seg_idx = -1
 
-    # ─── 点击句子跳转播放 ───
-    def on_sentence_tap(self, btn_instance):
-        """点击句子 → 跳转到该句开始时间并播放"""
-        if not self.sound:
-            return
-        seg = btn_instance.segment_data
-        if seg:
-            self.sound.seek(seg['start'])
-            self.ids.seek_slider.value = seg['start']
-            if not self.is_playing:
-                self.toggle_play()
-            # 更新翻译区
-            self.ids.chinese_text.text = seg.get('chinese', '')
-            self._highlight_at_time(seg['start'])
+    # ── 句子点击 ──
+    def on_sentence_tap(self, row):
+        seg = row.seg_data
+        if seg and self.sound:
+            try:
+                self.sound.seek(seg['start'])
+                self.ids.seek_slider.value = seg['start']
+                if not self.is_playing:
+                    self.toggle_play()
+            except Exception:
+                pass
 
-    # ─── 转写 ───
+    # ── 转写 ──
     def start_transcribe(self):
-        if not self.current_audio_path:
-            self.show_popup('提示', '请先点击"导入音频"选择音频文件')
+        if not self.audio_path:
+            self.ids.study_status.text = '请先选择音频文件'
             return
 
-        self.ids.status_label.text = '正在转写，请稍候...'
-        self.ids.progress.opacity = 1
-        self.ids.progress.value = 15
+        self.ids.transcribe_progress.opacity = 1
+        self.ids.transcribe_progress.value = 0
+        self.ids.study_status.text = '正在转写...'
 
         thread = threading.Thread(target=self._transcribe_thread)
         thread.daemon = True
@@ -797,313 +646,279 @@ class MainScreen(Screen):
         try:
             from openai import OpenAI
 
-            Clock.schedule_once(lambda dt: self._set_status('连接服务器...'), 0)
+            Clock.schedule_once(lambda dt: self._set_progress(10, '连接服务器...'), 0)
             client = OpenAI(api_key=API_KEY, base_url=API_BASE)
 
-            Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'value', 30), 0)
-            Clock.schedule_once(lambda dt: self._set_status('正在转写音频...'), 0)
+            Clock.schedule_once(lambda dt: self._set_progress(20, '转写中...'), 0)
 
-            # 用 verbose_json 获取时间戳
-            with open(self.current_audio_path, "rb") as f:
-                response = client.audio.transcriptions.create(
+            with open(self.audio_path, "rb") as f:
+                resp = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=f,
                     language="de",
                     response_format="verbose_json"
                 )
 
-            # 解析segments
             segments_raw = []
-            full_text = ""
-            for seg in response.segments:
-                text = seg.text.strip()
+            for seg in resp.segments:
                 segments_raw.append({
                     'start': seg.start,
                     'end': seg.end,
-                    'text': text
+                    'text': seg.text.strip(),
+                    'chinese': ''
                 })
-                full_text += text + " "
 
-            Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'value', 60), 0)
-            Clock.schedule_once(lambda dt: self._set_status(f'转写完成，{len(segments_raw)}句，正在翻译...'), 0)
+            Clock.schedule_once(lambda dt: self._set_progress(50, f'转写完成 {len(segments_raw)} 句，翻译中...'), 0)
 
             # 逐句翻译
-            translated_segments = []
             for i, seg in enumerate(segments_raw):
                 try:
                     tr = client.chat.completions.create(
                         model="gpt-3.5-turbo",
                         messages=[
-                            {"role": "system", "content": "将德语翻译为中文，只输出翻译。"},
+                            {"role": "system", "content": "将德语翻译为中文，只输出翻译结果。"},
                             {"role": "user", "content": seg['text']}
                         ]
                     )
-                    chinese = tr.choices[0].message.content.strip()
+                    seg['chinese'] = tr.choices[0].message.content.strip()
                 except Exception:
-                    chinese = "[翻译失败]"
-                translated_segments.append({
-                    'start': seg['start'],
-                    'end': seg['end'],
-                    'text': seg['text'],
-                    'chinese': chinese
-                })
+                    seg['chinese'] = ''
 
-            # 完整翻译（用于收藏区）
-            full_chinese = "\n".join(s['chinese'] for s in translated_segments)
+                pct = 50 + int(45 * (i + 1) / len(segments_raw))
+                Clock.schedule_once(lambda dt, p=pct: self._set_progress(p, None), 0)
 
-            Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'value', 100), 0)
-            Clock.schedule_once(
-                lambda dt: self._update_result(translated_segments, full_text.strip(), full_chinese),
-                0
-            )
+            Clock.schedule_once(lambda dt: self._build_sentences(segments_raw), 0)
+            Clock.schedule_once(lambda dt: self._set_progress(100, f'完成：{len(segments_raw)} 句'), 0)
 
         except ImportError:
-            Clock.schedule_once(lambda dt: self._set_status('错误: 缺少openai库'), 0)
+            Clock.schedule_once(lambda dt: self._set_progress(0, '缺少 openai 库'), 0)
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._set_status(f'错误: {str(e)[:80]}'), 0)
-        finally:
-            Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'opacity', 0), 3)
+            Clock.schedule_once(lambda dt: self._set_progress(0, f'错误: {str(e)[:60]}'), 0)
 
-    def _set_status(self, text):
-        self.ids.status_label.text = text
+    def _set_progress(self, value, text):
+        if value > 0:
+            self.ids.transcribe_progress.value = value
+        if value >= 100 or value == 0:
+            Clock.schedule_once(lambda dt: setattr(self.ids.transcribe_progress, 'opacity', 0), 2)
+        if text:
+            self.ids.study_status.text = text
 
-    def _update_result(self, translated_segments, full_german, full_chinese):
-        """更新转写结果到UI"""
-        self.segments = translated_segments
-
-        # 清空旧句子列表
+    def _build_sentences(self, segments_data):
+        """构建句子列表"""
+        self.segments = segments_data
         self.ids.sentence_list.clear_widgets()
-        self.sentence_buttons = []
-        self.current_segment_idx = -1
+        self.sentence_rows = []
+        self.current_seg_idx = -1
 
-        # 创建句子按钮
-        for i, seg in enumerate(translated_segments):
-            time_str = self._fmt_time(seg['start'])
-            display_text = f"[{time_str}]  {seg['text']}"
-
-            btn = SentenceButton(
-                segment_data=seg,
-                text=display_text,
+        for seg in segments_data:
+            row = SentenceRow(
+                seg_data=seg,
+                time_text=self._fmt(seg['start']),
+                german_text=seg['text'],
+                chinese_text=seg.get('chinese', '')
             )
-            btn.bind(on_press=self.on_sentence_tap)
-            self.ids.sentence_list.add_widget(btn)
-            self.sentence_buttons.append(btn)
+            row.bind(on_touch_down=lambda inst, touch, r=row: self.on_sentence_tap(r) if inst.collide_point(*touch.pos) else None)
+            self.ids.sentence_list.add_widget(row)
+            self.sentence_rows.append(row)
 
-        # 更新中文区
-        self.ids.chinese_text.text = full_chinese
-        self.ids.status_label.text = f'转写完成：{len(translated_segments)}个句子'
-
-    # ─── 收藏 ───
-    def collect_sentence(self):
-        """收藏当前高亮的句子"""
-        if 0 <= self.current_segment_idx < len(self.segments):
-            seg = self.segments[self.current_segment_idx]
-            item = {'german': seg['text'], 'chinese': seg.get('chinese', '')}
+    # ── 收藏 ──
+    def collect_current(self):
+        if 0 <= self.current_seg_idx < len(self.segments):
+            seg = self.segments[self.current_seg_idx]
+            self._save_item(seg['text'], seg.get('chinese', ''))
+        elif self.segments:
+            self._save_item('\n'.join(s['text'] for s in self.segments),
+                          '\n'.join(s.get('chinese', '') for s in self.segments))
         else:
-            # 收藏全部
-            german = "\n".join(s['text'] for s in self.segments)
-            chinese = self.ids.chinese_text.text
-            if not german:
-                self.ids.status_label.text = '没有可收藏的内容'
-                return
-            item = {'german': german, 'chinese': chinese}
+            self.ids.study_status.text = '没有可收藏的内容'
 
-        self.collected_sentences.append(item)
-        if self.store:
-            try:
-                key = f"item_{int(time.time())}"
-                self.store.put(key, german=item['german'], chinese=item['chinese'])
-            except Exception as e:
-                print(f"保存失败: {e}")
+    def collect_all(self):
+        if not self.segments:
+            self.ids.study_status.text = '没有可收藏的内容'
+            return
+        self._save_item('\n'.join(s['text'] for s in self.segments),
+                       '\n'.join(s.get('chinese', '') for s in self.segments))
 
-        self.ids.status_label.text = f'已收藏 ({len(self.collected_sentences)}条)'
-
-    def show_collection(self):
-        app = App.get_running_app()
-        cs = app.root.get_screen('collection')
-        cs.load_sentences(self.collected_sentences)
-        app.root.current = 'collection'
-
-    def copy_text(self):
-        parts = []
-        for seg in self.segments:
-            parts.append(f"{seg['text']}\n{seg.get('chinese', '')}")
-        if parts:
-            Clipboard.copy("\n\n".join(parts))
-            self.ids.status_label.text = '已复制到剪贴板'
-
-    def clear_all(self):
-        self.ids.sentence_list.clear_widgets()
-        self.sentence_buttons = []
-        self.segments = []
-        self.current_segment_idx = -1
-        self.ids.chinese_text.text = ''
-        self.ids.status_label.text = '已清空'
+    def _save_item(self, german, chinese):
+        try:
+            store_path = os.path.join(get_storage_dir(), 'sentences.json')
+            store = JsonStore(store_path)
+            key = f'item_{int(time.time())}'
+            store.put(key, german=german, chinese=chinese)
+            count = len(store)
+            self.ids.study_status.text = f'已收藏 ({count} 条)'
+        except Exception as e:
+            self.ids.study_status.text = f'收藏失败: {e}'
 
     def export_anki(self):
-        if not self.collected_sentences:
-            self.show_popup('提示', '没有收藏的句子')
-            return
         try:
-            if platform == 'android':
-                from android.storage import app_storage_path
-                export_dir = app_storage_path()
-            else:
-                export_dir = os.path.dirname(__file__)
-            filepath = os.path.join(export_dir, 'anki_export.txt')
-            with open(filepath, 'w', encoding='utf-8') as f:
-                for item in self.collected_sentences:
-                    g = item['german'].replace('\n', ' ').replace('\t', ' ')
-                    c = item['chinese'].replace('\n', ' ').replace('\t', ' ')
-                    f.write(f"{g}\t{c}\n")
-            self.ids.status_label.text = f'已导出 {len(self.collected_sentences)} 条'
-            self.show_popup('导出成功', f'文件: {filepath}\n\nAnki → 文件 → 导入 → 制表符分隔')
-        except Exception as e:
-            self.show_popup('导出失败', str(e))
+            store_path = os.path.join(get_storage_dir(), 'sentences.json')
+            if not os.path.exists(store_path):
+                self.ids.study_status.text = '没有收藏内容'
+                return
 
-    def show_popup(self, title, message):
-        popup = Popup(
-            title=title,
-            title_font=FONT_NAME,
-            size_hint=(0.85, None),
-            height=dp(190)
-        )
-        content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
-        content.add_widget(Label(
-            text=message,
-            font_name=FONT_NAME,
-            text_size=(Window.width * 0.7, None),
-            halign='left',
-            valign='top'
-        ))
-        btn = Button(
-            text='确定',
-            font_name=FONT_NAME,
-            size_hint_y=None,
-            height=dp(42),
-            background_color=(0.2, 0.6, 0.8, 1)
-        )
-        btn.bind(on_press=popup.dismiss)
-        content.add_widget(btn)
-        popup.content = content
-        popup.open()
+            store = JsonStore(store_path)
+            export_path = os.path.join(get_storage_dir(), 'anki_export.txt')
+            count = 0
+            with open(export_path, 'w', encoding='utf-8') as f:
+                for key in store:
+                    item = store.get(key)
+                    g = item.get('german', '').replace('\n', ' ').replace('\t', ' ')
+                    c = item.get('chinese', '').replace('\n', ' ').replace('\t', ' ')
+                    f.write(f'{g}\t{c}\n')
+                    count += 1
+
+            self.ids.study_status.text = f'已导出 {count} 条 → anki_export.txt'
+        except Exception as e:
+            self.ids.study_status.text = f'导出失败: {e}'
+
+    def go_back(self):
+        self._stop_playback()
+        App.get_running_app().root.current = 'browse'
+
+    # ── 工具方法 ──
+    def _get_duration(self):
+        try:
+            d = getattr(self.sound, 'length', 0)
+            return d if d and d > 0 else 0
+        except Exception:
+            return 0
 
     @staticmethod
-    def _fmt_time(seconds):
+    def _fmt(seconds):
         seconds = int(seconds)
         m, s = divmod(seconds, 60)
         return f'{m}:{s:02d}'
 
 
-# ── 收藏屏幕 ──
+# ═══════════ 页面3: 收藏管理 ═══════════
 class CollectionScreen(Screen):
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.sentences = []
+    def on_enter(self):
+        self.load_data()
 
-    def load_sentences(self, sentences):
-        self.sentences = sentences
-        self.ids.collection_list.clear_widgets()
+    def load_data(self):
+        self.ids.coll_list.clear_widgets()
+        try:
+            store_path = os.path.join(get_storage_dir(), 'sentences.json')
+            if not os.path.exists(store_path):
+                self.ids.coll_list.add_widget(Label(
+                    text='暂无收藏', font_name=F, size_hint_y=None, height=dp(60)
+                ))
+                return
 
-        if not sentences:
-            self.ids.collection_list.add_widget(Label(
-                text='暂无收藏',
-                font_name=FONT_NAME,
-                size_hint_y=None,
-                height=dp(50)
+            store = JsonStore(store_path)
+            keys = list(store.keys())
+            if not keys:
+                self.ids.coll_list.add_widget(Label(
+                    text='暂无收藏', font_name=F, size_hint_y=None, height=dp(60)
+                ))
+                return
+
+            for idx, key in enumerate(reversed(keys)):
+                item = store.get(key)
+                german = item.get('german', '')
+                preview = german[:40].replace('\n', ' ')
+                btn = Button(
+                    text=f'{len(keys)-idx}. {preview}',
+                    font_name=F,
+                    font_size='13sp',
+                    size_hint_y=None,
+                    height=dp(50),
+                    background_color=(0.95, 0.95, 0.95, 1),
+                    color=(0.1, 0.1, 0.1, 1),
+                    halign='left',
+                    text_size=(Window.width * 0.8, None)
+                )
+                btn.bind(on_press=lambda x, k=key: self.show_item(k))
+                self.ids.coll_list.add_widget(btn)
+
+        except Exception as e:
+            self.ids.coll_list.add_widget(Label(
+                text=f'加载失败: {e}', font_name=F, size_hint_y=None, height=dp(60)
             ))
-            return
 
-        for i, item in enumerate(reversed(sentences)):
-            preview = item['german'][:45].replace('\n', ' ')
-            btn = Button(
-                text=f"{len(sentences)-i}. {preview}...",
-                font_name=FONT_NAME,
-                font_size='13sp',
-                size_hint_y=None,
-                height=dp(52),
-                background_color=(0.95, 0.95, 0.95, 1),
-                color=(0.1, 0.1, 0.1, 1),
-                halign='left',
-                text_size=(Window.width * 0.78, None)
-            )
-            btn.bind(on_press=lambda x, idx=len(sentences)-1-i: self.show_detail(idx))
-            self.ids.collection_list.add_widget(btn)
+    def show_item(self, key):
+        try:
+            store_path = os.path.join(get_storage_dir(), 'sentences.json')
+            store = JsonStore(store_path)
+            item = store.get(key)
 
-    def show_detail(self, index):
-        if index >= len(self.sentences):
-            return
-        item = self.sentences[index]
-        popup = Popup(title='收藏详情', title_font=FONT_NAME, size_hint=(0.92, 0.55))
-        content = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(8))
-        scroll = ScrollView()
-        dl = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(6))
-        dl.bind(minimum_height=dl.setter('height'))
+            popup = Popup(title='详情', title_font=F, size_hint=(0.92, 0.55))
+            content = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(8))
 
-        for label_text in [f"德语:\n{item['german']}", f"中文:\n{item['chinese']}"]:
-            lbl = Label(
-                text=label_text,
-                font_name=FONT_NAME,
-                text_size=(Window.width * 0.78, None),
-                size_hint_y=None,
-                halign='left',
-                valign='top'
-            )
-            lbl.bind(texture_size=lbl.setter('size'))
-            dl.add_widget(lbl)
+            scroll = ScrollView()
+            dl = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(6))
+            dl.bind(minimum_height=dl.setter('height'))
 
-        scroll.add_widget(dl)
-        content.add_widget(scroll)
+            for txt in [f"德语:\n{item['german']}", f"中文:\n{item['chinese']}"]:
+                lbl = Label(
+                    text=txt, font_name=F,
+                    text_size=(Window.width * 0.78, None),
+                    size_hint_y=None, halign='left', valign='top'
+                )
+                lbl.bind(texture_size=lbl.setter('size'))
+                dl.add_widget(lbl)
+            scroll.add_widget(dl)
+            content.add_widget(scroll)
 
-        btns = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(6))
-        for txt, color, action in [
-            ('复制', (0.3, 0.5, 0.8, 1), lambda x: Clipboard.copy(f"{item['german']}\n\n{item['chinese']}")),
-            ('删除', (0.8, 0.3, 0.3, 1), lambda x: (self._del(index), popup.dismiss())),
-            ('关闭', (0.5, 0.5, 0.5, 1), lambda x: popup.dismiss())
-        ]:
-            b = Button(text=txt, font_name=FONT_NAME, background_color=color)
-            b.bind(on_press=action)
-            btns.add_widget(b)
-        content.add_widget(btns)
-        popup.content = content
-        popup.open()
+            btns = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(6))
+            for txt, color, action in [
+                ('复制', (0.3, 0.5, 0.8, 1), lambda x: Clipboard.copy(f"{item['german']}\n\n{item['chinese']}")),
+                ('删除', (0.8, 0.3, 0.3, 1), lambda x: (self.delete_item(key), popup.dismiss())),
+                ('关闭', (0.5, 0.5, 0.5, 1), lambda x: popup.dismiss())
+            ]:
+                b = Button(text=txt, font_name=F, background_color=color)
+                b.bind(on_press=action)
+                btns.add_widget(b)
+            content.add_widget(btns)
+            popup.content = content
+            popup.open()
+        except Exception:
+            pass
 
-    def _del(self, idx):
-        if 0 <= idx < len(self.sentences):
-            self.sentences.pop(idx)
-            self.load_sentences(self.sentences)
+    def delete_item(self, key):
+        try:
+            store_path = os.path.join(get_storage_dir(), 'sentences.json')
+            store = JsonStore(store_path)
+            store.delete(key)
+            self.load_data()
+        except Exception:
+            pass
 
-    def clear_collection(self):
-        self.sentences.clear()
-        self.ids.collection_list.clear_widgets()
-        self.ids.collection_list.add_widget(Label(
-            text='已清空', font_name=FONT_NAME, size_hint_y=None, height=dp(50)
-        ))
-
-    def go_back(self):
-        App.get_running_app().root.current = 'main'
+    def clear_all(self):
+        try:
+            store_path = os.path.join(get_storage_dir(), 'sentences.json')
+            if os.path.exists(store_path):
+                os.remove(store_path)
+            self.load_data()
+        except Exception:
+            pass
 
 
-# ── 应用 ──
-
+# ═══════════ 应用 ═══════════
 class DeutschLernenApp(App):
 
     def build(self):
         self.title = '德语学习助手'
         self._load_font()
+
         sm = ScreenManager()
-        sm.add_widget(MainScreen())
-        sm.add_widget(CollectionScreen())
+        sm.add_widget(BrowseScreen())     # 首页：文件浏览
+        sm.add_widget(StudyScreen())       # 学习页
+        sm.add_widget(CollectionScreen())  # 收藏页
         return sm
 
     def _load_font(self):
-        from kivy.core.text import LabelBase
-        if os.path.exists(FONT_PATH):
-            LabelBase.register(name=FONT_NAME, fn_regular=FONT_PATH)
-            print(f"字体加载成功: {FONT_PATH}")
-        else:
-            print(f"字体文件不存在: {FONT_PATH}")
+        try:
+            from kivy.core.text import LabelBase
+            if os.path.exists(FONT_PATH):
+                LabelBase.register(name=FONT_NAME, fn_regular=FONT_PATH)
+                print(f'字体已加载: {FONT_PATH}')
+            else:
+                print(f'字体不存在: {FONT_PATH}')
+        except Exception as e:
+            print(f'字体加载失败: {e}')
 
     def on_pause(self):
         return True

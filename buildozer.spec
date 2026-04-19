@@ -19,11 +19,11 @@ source.include_exts = py,png,jpg,kv,atlas,json,md,txt,ttf,otf
 source.include_patterns = resources/*,src/*,config.json,fonts/*
 
 # (str) Application versioning (method 1)
-version = 0.5.1
+version = 1.0.0
 
 # (list) Application requirements
 # 这里列出应用需要的Python包
-requirements = python3,kivy==2.3.0,pyjnius,android,plyer,requests,openai,pillow
+requirements = python3,kivy==2.3.0,pyjnius,android,requests,openai,pillow
 
 # (str) Supported orientation (one of landscape, portrait or all)
 orientation = portrait
@@ -45,7 +45,7 @@ icon.filename = resources/icons/app_icon.png
 
 # (list) Permissions
 # 添加需要的安卓权限
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO,MODIFY_AUDIO_SETTINGS
+android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO,MODIFY_AUDIO_SETTINGS,READ_MEDIA_AUDIO
 
 # (int) Target Android API, should be as high as possible.
 android.api = 33
