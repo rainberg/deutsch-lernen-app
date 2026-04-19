@@ -387,52 +387,100 @@ class MainScreen(Screen):
             self.ids.status_label.text = '请在安卓设备上使用文件选择器'
 
     def on_audio_selected(self, selection):
-        """处理选择的文件（Android返回content:// URI需要复制到本地）"""
+        """处理选择的文件"""
         if not selection:
             return
 
         raw_path = selection[0]
+        filename = os.path.basename(raw_path) if '/' in raw_path else 'audio'
 
-        # 显示进度条
+        # 显示进度条并启动动画
         self.ids.progress.opacity = 1
-        self.ids.progress.value = 10
-        self.ids.status_label.text = '正在读取文件...'
+        self.ids.progress.value = 0
+        self.ids.status_label.text = f'已选择: {filename}，准备导入...'
 
-        # 后台线程处理，避免阻塞UI
+        # 启动平滑进度动画（0→95%缓慢推进，实际完成后跳到100%）
+        self._anim_progress = 0
+        self._anim_event = Clock.schedule_interval(self._animate_progress, 0.15)
+
+        # 后台线程处理
         thread = threading.Thread(target=self._import_thread, args=(raw_path,))
         thread.daemon = True
         thread.start()
 
+    def _animate_progress(self, dt):
+        """平滑进度动画（模拟加载感）"""
+        if self._anim_progress < 90:
+            # 慢慢推进到90%
+            step = max(1, (90 - self._anim_progress) // 8)
+            self._anim_progress = min(90, self._anim_progress + step)
+            self.ids.progress.value = self._anim_progress
+
+    def _stop_animation(self, final_value):
+        """停止动画并设置最终值"""
+        if hasattr(self, '_anim_event') and self._anim_event:
+            self._anim_event.cancel()
+            self._anim_event = None
+        self.ids.progress.value = final_value
+
     def _import_thread(self, raw_path):
         """后台导入线程"""
         try:
-            if platform == 'android':
-                Clock.schedule_once(lambda dt: self._set_progress(20, '正在复制文件到本地...'), 0)
+            is_android = platform == 'android'
+
+            # 步骤1: 复制文件
+            if is_android and raw_path.startswith('content://'):
+                self._tick_progress_msg('正在读取文件...')
                 local_path = self._copy_content_uri_to_local(raw_path)
-                if local_path:
-                    Clock.schedule_once(lambda dt: self._set_progress(60, f'复制完成: {os.path.basename(local_path)}'), 0)
-                    self.current_audio_path = local_path
-                else:
-                    Clock.schedule_once(lambda dt: self._set_progress(0, '文件复制失败，请重试'), 0)
-                    Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'opacity', 0), 2)
+                if not local_path:
+                    self._tick_fail('复制失败，请重试')
                     return
+                self.current_audio_path = local_path
             else:
                 self.current_audio_path = raw_path
-                Clock.schedule_once(lambda dt: self._set_progress(40, f'已选择: {os.path.basename(raw_path)}'), 0)
 
-            # 加载音频到播放器
-            Clock.schedule_once(lambda dt: self._set_progress(70, '正在初始化播放器...'), 0)
-            Clock.schedule_once(lambda dt: self._load_audio_player(), 0)
+            # 步骤2: 加载播放器
+            self._tick_progress_msg('正在加载播放器...')
+
+            # 在主线程加载音频（SoundLoader必须在主线程）
+            done = threading.Event()
+            def load_on_main():
+                try:
+                    self._load_audio_player()
+                except Exception as e:
+                    print(f"_load_audio_player异常: {e}")
+                finally:
+                    done.set()
+            Clock.schedule_once(lambda dt: load_on_main(), 0)
+            done.wait(timeout=15)
+
+            # 步骤3: 完成
+            self._tick_done()
 
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._set_progress(0, f'导入失败: {e}'), 0)
-            Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'opacity', 0), 2)
+            print(f"导入异常: {e}")
+            import traceback
+            traceback.print_exc()
+            self._tick_fail(f'导入失败: {e}')
 
-    def _set_progress(self, value, status_text):
-        """更新进度条和状态文本"""
-        if value > 0:
-            self.ids.progress.value = value
-        self.ids.status_label.text = status_text
+    def _tick_progress_msg(self, msg):
+        """仅更新状态文字（进度由动画驱动）"""
+        Clock.schedule_once(lambda dt: setattr(self.ids.status_label, 'text', msg), 0)
+
+    def _tick_done(self):
+        """导入完成"""
+        def finish(dt):
+            self._stop_animation(100)
+            self.ids.progress.opacity = 0
+        Clock.schedule_once(finish, 0)
+
+    def _tick_fail(self, msg):
+        """导入失败"""
+        def fail(dt):
+            self._stop_animation(0)
+            self.ids.status_label.text = msg
+            Clock.schedule_once(lambda dt2: setattr(self.ids.progress, 'opacity', 0), 2)
+        Clock.schedule_once(fail, 0)
 
     def _copy_content_uri_to_local(self, uri):
         """将Android content:// URI复制到应用本地存储"""
@@ -553,22 +601,15 @@ class MainScreen(Screen):
                     self.ids.seek_slider.max = duration
                     self.ids.time_label.text = f'0:00/{self._fmt_time(duration)}'
                     file_size = os.path.getsize(path) // 1024
-                    self.ids.progress.value = 100
                     self.ids.status_label.text = f'已加载 ({self._fmt_time(duration)}, {file_size}KB)，点击播放'
                 else:
                     self.ids.seek_slider.max = 9999
                     self.ids.time_label.text = '0:00/?:??'
-                    self.ids.progress.value = 100
                     self.ids.status_label.text = '音频已加载，点击播放'
-
-                # 2秒后隐藏进度条
-                Clock.schedule_once(lambda dt: setattr(self.ids.progress, 'opacity', 0), 2)
             else:
-                self.ids.progress.opacity = 0
                 self.ids.status_label.text = '无法加载音频，格式可能不支持（支持mp3/ogg/wav）'
 
         except Exception as e:
-            self.ids.progress.opacity = 0
             self.ids.status_label.text = f'加载异常: {e}'
             import traceback
             traceback.print_exc()
