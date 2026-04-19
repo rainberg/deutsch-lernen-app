@@ -18,6 +18,7 @@ from kivy.uix.slider import Slider
 from kivy.core.window import Window
 from kivy.utils import platform
 from kivy.clock import Clock
+from kivy.properties import BooleanProperty
 import threading
 import time
 
@@ -74,7 +75,9 @@ BoxLayout:
     BoxLayout:
         orientation: 'vertical'
         spacing: dp(5)
+        padding: [0, dp(5)]
 
+        # 进度条
         Slider:
             id: slider
             size_hint_y: None
@@ -82,35 +85,123 @@ BoxLayout:
             min: 0
             max: 100
             value: 0
+            on_touch_up: app.on_slider_seek(self, args[1])
 
+        # 时间
         Label:
             id: lbl_time
             text: '0:00 / 0:00'
             font_name: "''' + FONT_NAME + '''"
             size_hint_y: None
-            height: dp(25)
+            height: dp(22)
             color: 0.3, 0.3, 0.3, 1
 
+        # 控制按钮行
         BoxLayout:
             size_hint_y: None
-            height: dp(50)
-            spacing: dp(10)
+            height: dp(55)
+            spacing: dp(8)
 
+            # 后退10秒
+            Button:
+                text: '<< 10s'
+                font_name: "''' + FONT_NAME + '''"
+                font_size: '14sp'
+                on_press: app.skip(-10)
+                disabled: not app.has_audio
+                background_color: 0.7, 0.7, 0.7, 1
+
+            # 播放/暂停
             Button:
                 id: btn_play
                 text: '播放'
                 font_name: "''' + FONT_NAME + '''"
-                font_size: '16sp'
+                font_size: '17sp'
+                bold: True
                 on_press: app.toggle_play()
-                disabled: True
+                disabled: not app.has_audio
+                background_color: 0.2, 0.6, 0.8, 1
+
+            # 停止
+            Button:
+                text: '■'
+                font_size: '20sp'
+                on_press: app.stop_audio()
+                disabled: not app.has_audio
+                size_hint_x: 0.4
+                background_color: 0.5, 0.5, 0.5, 1
+
+            # 前进10秒
+            Button:
+                text: '10s >>'
+                font_name: "''' + FONT_NAME + '''"
+                font_size: '14sp'
+                on_press: app.skip(10)
+                disabled: not app.has_audio
+                background_color: 0.7, 0.7, 0.7, 1
+
+        # 速度控制
+        BoxLayout:
+            size_hint_y: None
+            height: dp(36)
+            spacing: dp(6)
+
+            Label:
+                text: '速度:'
+                font_name: "''' + FONT_NAME + '''"
+                font_size: '12sp'
+                size_hint_x: None
+                width: dp(40)
+                color: 0.4, 0.4, 0.4, 1
+
+            Button:
+                text: '0.5x'
+                font_name: "''' + FONT_NAME + '''"
+                font_size: '12sp'
+                size_hint_x: None
+                width: dp(50)
+                on_press: app.set_speed(0.5)
+                background_color: 0.9, 0.9, 0.9, 1
+                color: 0.2, 0.2, 0.2, 1
+
+            Button:
+                text: '0.75x'
+                font_name: "''' + FONT_NAME + '''"
+                font_size: '12sp'
+                size_hint_x: None
+                width: dp(55)
+                on_press: app.set_speed(0.75)
+                background_color: 0.9, 0.9, 0.9, 1
+                color: 0.2, 0.2, 0.2, 1
+
+            Button:
+                text: '1x'
+                font_name: "''' + FONT_NAME + '''"
+                font_size: '12sp'
+                size_hint_x: None
+                width: dp(45)
+                on_press: app.set_speed(1.0)
                 background_color: 0.2, 0.6, 0.8, 1
 
             Button:
-                text: '停止'
+                text: '1.25x'
                 font_name: "''' + FONT_NAME + '''"
-                font_size: '16sp'
-                on_press: app.stop_audio()
-                background_color: 0.5, 0.5, 0.5, 1
+                font_size: '12sp'
+                size_hint_x: None
+                width: dp(55)
+                on_press: app.set_speed(1.25)
+                background_color: 0.9, 0.9, 0.9, 1
+                color: 0.2, 0.2, 0.2, 1
+
+            Button:
+                text: '1.5x'
+                font_name: "''' + FONT_NAME + '''"
+                font_size: '12sp'
+                size_hint_x: None
+                width: dp(50)
+                on_press: app.set_speed(1.5)
+                background_color: 0.9, 0.9, 0.9, 1
+                color: 0.2, 0.2, 0.2, 1
 
     # 测试按钮：验证字体
     Button:
@@ -209,6 +300,8 @@ class AndroidPlayer:
 
 class TestApp(App):
 
+    has_audio = BooleanProperty(False)  # 是否已加载音频
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.player = None          # AndroidPlayer 或 Kivy SoundLoader
@@ -217,6 +310,7 @@ class TestApp(App):
         self.is_playing = False
         self.tick_event = None
         self.audio_path = None
+        self.playback_speed = 1.0
 
     def build(self):
         self._load_font()
@@ -390,6 +484,7 @@ class TestApp(App):
                     self.root.ids.lbl_time.text = f'0:00 / {self._fmt(dur)}'
                     self.root.ids.btn_play.disabled = False
                     self._status(f'加载成功 ({self._fmt(dur)})，可播放')
+                    self.has_audio = True
                     print(f"Android MediaPlayer: 时长={dur}s")
             except Exception as e:
                 print(f"Android MediaPlayer异常: {e}")
@@ -408,6 +503,7 @@ class TestApp(App):
                     self.root.ids.lbl_time.text = f'0:00 / {self._fmt(dur)}'
                     self.root.ids.btn_play.disabled = False
                     self._status(f'Kivy加载成功 ({self._fmt(dur)})，可播放')
+                    self.has_audio = True
                     print(f"SoundLoader: 时长={dur}s")
                 else:
                     self._status('SoundLoader返回None')
@@ -530,6 +626,64 @@ class TestApp(App):
 
     def _status(self, text):
         self.root.ids.lbl_status.text = text
+
+    def skip(self, seconds):
+        """前进/后退指定秒数"""
+        if self.use_android_player and self.player:
+            try:
+                pos = self.player.get_pos()
+                new_pos = max(0, min(pos + seconds, self.player.length))
+                self.player.seek(new_pos)
+                self.root.ids.slider.value = new_pos
+                self.root.ids.lbl_time.text = f'{self._fmt(new_pos)} / {self._fmt(self.player.length)}'
+            except Exception:
+                pass
+        elif self.kivy_sound:
+            try:
+                pos = self.kivy_sound.get_pos()
+                dur = getattr(self.kivy_sound, 'length', 0) or 0
+                new_pos = max(0, min(pos + seconds, dur))
+                self.kivy_sound.seek(new_pos)
+                self.root.ids.slider.value = new_pos
+                self.root.ids.lbl_time.text = f'{self._fmt(new_pos)} / {self._fmt(dur)}'
+            except Exception:
+                pass
+
+    def on_slider_seek(self, slider, touch):
+        """拖拽进度条跳转"""
+        if slider.collide_point(*touch.pos):
+            val = slider.value
+            if self.use_android_player and self.player:
+                try:
+                    self.player.seek(val)
+                except Exception:
+                    pass
+            elif self.kivy_sound:
+                try:
+                    self.kivy_sound.seek(val)
+                except Exception:
+                    pass
+
+    def set_speed(self, speed):
+        """设置播放速度"""
+        self.playback_speed = speed
+        if self.use_android_player and self.player and self.player.player:
+            try:
+                from jnius import autoclass
+                Build = autoclass('android.os.Build')
+                # API 23+ 才支持 setPlaybackParams
+                if Build.VERSION.SDK_INT >= 23:
+                    PlaybackParams = autoclass('android.media.PlaybackParams')
+                    params = self.player.player.getPlaybackParams()
+                    params.setSpeed(speed)
+                    self.player.player.setPlaybackParams(params)
+                    self._status(f'速度: {speed}x')
+                else:
+                    self._status('Android 6.0+ 才支持变速')
+            except Exception as e:
+                self._status(f'变速失败: {e}')
+        else:
+            self._status(f'速度: {speed}x')
 
     @staticmethod
     def _fmt(s):
